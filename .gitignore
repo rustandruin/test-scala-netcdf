@@ -1,0 +1,6 @@
+*.nc
+*.grb2
+target
+climate*
+project/project
+project/target
