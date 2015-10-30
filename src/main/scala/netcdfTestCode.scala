@@ -3,6 +3,7 @@ package org.apache.spark.mllib.linalg.distributed
 // basic Spark
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
+import org.apache.spark.Logging
 
 // Mllib support
 
@@ -21,7 +22,7 @@ import org.msgpack.MessagePack
 // misc Scala
 import scala.util.Try
 
-object netCDFTest {
+object netCDFTest extends Logging {
 
   def main(args: Array[String]) = {
     val conf = new SparkConf().setAppName("testNetCDF")
@@ -37,7 +38,7 @@ object netCDFTest {
     // Load using NetCDF binding
     val infileTry = Try(NetcdfFile.open(inpath))
     if (!infileTry.isSuccess) { 
-      report("Couldn't open the input file " + inpath)
+      logError("Couldn't open the input file " + inpath)
       sc.stop()
       System.exit(1)
     }
@@ -53,11 +54,7 @@ object netCDFTest {
   }
   
   def report(message: String, verbose: Boolean = true) {
-    if (verbose) {
-      val now = Calendar.getInstance().getTime()
-      val formatter = new SimpleDateFormat("H:m:s")
-      println("STATUS REPORT (" + formatter.format(now) + "): " + message)
-    }
+    if (verbose) logInfo(message);
   }
 
 }
