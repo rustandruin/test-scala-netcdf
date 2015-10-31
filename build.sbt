@@ -5,7 +5,6 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % "1.3.1" % "provided",
   "org.apache.spark" %% "spark-mllib" % "1.3.1" % "provided",
   "com.github.fommil.netlib" % "all" % "1.1.2",
-  "org.msgpack" %% "msgpack-scala" % "0.6.11",
   "edu.ucar" % "cdm" % "4.5.5" exclude("commons-logging", "commons-logging"),
   "edu.ucar" % "grib" % "4.5.5" exclude("commons-logging", "commons-logging"),
   "edu.ucar" % "netcdf4" % "4.5.5" exclude("commons-logging", "commons-logging")
