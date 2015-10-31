@@ -12,5 +12,5 @@ libraryDependencies ++= Seq(
 
 lazy val runTest = taskKey[Unit]("Test loading and saving of netcdf data")
 runTest <<= (assembly in Compile) map {
-  (jarFile: File) => s"spark-submit --driver-memory 4G --class org.apache.spark.mllib.linalg.distributed.netCDFTest ${jarFile} test.nc output.nc" !
+  (jarFile: File) => s"spark-submit --driver-memory 4G --class org.apache.spark.mllib.linalg.distributed.netCDFTest ${jarFile} src/main/resources/test.nc output.nc" !
 }

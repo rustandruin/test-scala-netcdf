@@ -15,7 +15,7 @@ import java.util.Calendar
 import java.text.SimpleDateFormat
 
 // NetCDF support
-import ucar.nc2.{NetcdfFile, NetcdfFileWriter}
+import ucar.nc2.{NetcdfFile, NetcdfFileWriter, Dimension, Variable}
 import ucar.ma2.DataType
 import ucar.ma2.{Array => netcdfArray}
 
@@ -66,18 +66,22 @@ object netCDFTest extends Logging {
     val depthDim = outfile.addDimension(null, "depth", results2._1)
     val latDim = outfile.addDimension(null, "lat", rows)
     val lonDim = outfile.addDimension(null, "lon", cols)
-    val twodims = ArrayBuffer(depthDim, latDim, lonDim)
-    val threedims = ArrayBuffer(latDim, lonDim)
+    val twoDims = ArrayBuffer(latDim, lonDim)
+    val threeDims = ArrayBuffer(depthDim, latDim, lonDim)
     
-    val cloudcover = outfile.addVariable(null, "cloudcover", DataType.FLOAT, twodims);
-    val temperature = outfile.addVariable(null, "temperature", DataType.FLOAT, threedims);
+    val cloudcover = outfile.addVariable(null, "cloudcover", DataType.FLOAT, twoDims);
+    val temperature = outfile.addVariable(null, "temperature", DataType.FLOAT, threeDims);
 
-    outfile.write(cloudcover, null, netcdfArray.factory(DataType.FLOAT, Array(rows, cols), results._4.t.data))
     outfile.create
+
+    // breeze stores matrices in column-major, netcdf expects matrices in row-major format
+    var dataarray = netcdfArray.factory(DataType.FLOAT, Array(rows, cols), results._4.t.data)
+    writeClimate3DToNetCDF(outfile, temperature, results2._5, threeDims)
+
+    outfile.write(cloudcover, dataarray)
     outfile.close
   }
   
-
   // Note: NetCDF uses the row-major C convention for storing matrices: in the flattened vector, the index of the last axis changes fastest (e.g. see the help for numpy.reshape) 
   // while Breeze uses the column-major Fortran convention for storing matrices
   def netCDFflatToBreeze2D[T](flatdata : Array[T], rows : Int, cols : Int ) : DenseMatrix[T] = {
@@ -134,6 +138,23 @@ object netCDFTest extends Logging {
     var mungedMat = (new DenseVector(rawdata)).toDenseMatrix.reshape(cols*rows, depth).t.copy
     var mungedMask = mungedMat.copy.mapValues(_ == fillValue)
     (depth, rows, cols, fillValue, mungedMat, mungedMask)
+  }
+
+  // given a 3d matrix stored in breeze as a [depth, rows*cols] matrix so that each row of the matrix is unfolded into a breeze 2d matrix of
+  // [rows, cols] by using row.reshape(rows, cols), stores it into a netCDF array of size [depth, rows, cols]
+  // recall breeze stores data in column-major format, netcdf in row-major format
+  def writeClimate3DToNetCDF[T:ClassTag](outfile: NetcdfFileWriter, variable: Variable, mat: DenseMatrix[T], dims: ArrayBuffer[Dimension]) : Unit = {
+    logInfo("Writing " + variable.getFullName)
+    logInfo(variable.getFullName + " has dimensions " + variable.getDimensions)
+    var depth = dims(0).getLength
+    var rows = dims(1).getLength
+    var cols = dims(2).getLength
+    for (level <- 0 until depth) {
+      val origin = Array[Int](level, 0, 0)
+      val scalaArray = mat(level, ::).t.toDenseMatrix.reshape(cols, rows).data.toArray
+      val ncArray = netcdfArray.factory(variable.getDataType, Array(1, rows, cols), scalaArray)
+      outfile.write(variable, origin, ncArray)
+    }
   }
 
   def report(message: String, verbose: Boolean = true) {
