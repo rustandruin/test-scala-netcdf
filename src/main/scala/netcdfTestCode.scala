@@ -58,6 +58,10 @@ object netCDFTest extends Logging {
     var cols = results2._3
     var mat = results2._5(1,::).t.toDenseMatrix.reshape(cols, rows).t // extracts measurements at depth 1 as (lat, lon) matrix
 
+    // Unfortunately, grib doesn't explicitly store the latitude/longitude grid, it has to be computed from the number
+    // of grid points in each direction. PyGrib (in pygrib.pyx on github) has the logic to do this, so just assume that
+    // the appropriate grid is known
+
     // Save back out using NetCDF binding
 
     // How to error-handle this?
