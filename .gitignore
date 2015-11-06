@@ -1,5 +1,6 @@
 *.nc
 *.grb2
+filenamelist
 target
 climate*
 project/project

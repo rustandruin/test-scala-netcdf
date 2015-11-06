@@ -7,18 +7,22 @@ import org.apache.spark.sql.SQLContext
 
 import scala.sys.process._
 import scala.collection.mutable.ArrayBuffer
-import scala.util.{Random, Try}
+import scala.util.Try
 import scala.util.control.Breaks._
 import scala.util.control.NonFatal
 
 import java.nio.file.{Files, Paths}
-import java.io.File
+import java.io.{File, FileInputStream, FileOutputStream}
+import java.util.concurrent.ThreadLocalRandom
 
 import ucar.nc2.{NetcdfFile, Dimension, Variable}
 import ucar.ma2.DataType
 import ucar.ma2.{Array => netcdfArray}
 
 import breeze.linalg.{DenseVector, DenseMatrix}
+
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.io.IOUtils
 
 object convertGribToParquet extends Logging {
 
@@ -44,47 +48,91 @@ object convertGribToParquet extends Logging {
   def convertToParquet( fnameGen: Iterator[String], fieldnames: String, index: Int) : Iterator[Tuple3[String, Array[Float], Array[Boolean]]] = {
     val fnames = fnameGen.toArray
     val results = ArrayBuffer[Tuple3[String, Array[Float], Array[Boolean]]]()
+    val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
 
     logInfo("This partition contains files: " + fnames.mkString(","))
+    logInfo(s"Using temporary file name : $tempfname")
 
-    val randGen = new Random(index)
-    val tempfname = "%s.%s".format(randGen.nextInt(64), "nc")
-    for(curfname <- fnames) {breakable{
+    // process non-tar files
+    for(curfname <- fnames.filter(s => !s.endsWith(".tar"))) {
+      val tempresult = getDataFromFile(curfname, fieldnames, tempfname) 
+      if (tempresult.isDefined) { results += tempresult.get}
+    }
 
-      logInfo(s"Converting ${curfname} from GRIB2 to NetCDF, extracting desired variables")
-      try {
-        // convert from grib to netcdf, preserving the variables we care about 
-        val result1 = s"ncl_convert2nc ${curfname} -v ${fieldnames}".!!
-        logInfo(s"Conversion done")
+    // process tar files
+    for(curfname <- fnames.filter(s => s.endsWith(".tar"))){
+      logInfo(s"Processing tar file: ${curfname}")
+      val archive = new TarArchiveInputStream(new FileInputStream(curfname)) 
+      var curentry = archive.getNextTarEntry
+      val tempfname2 = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "grb2")
 
-        // stupid hacky way to get the name of the netcdf file resulting from the ncl_convert2nc command
-        // it is located in the current directory
-        val ncfname = ("""\w+""".r findFirstIn Paths.get(curfname).getFileName.toString).get + ".nc"
-        Files.move(Paths.get(ncfname), Paths.get(tempfname))
-      } catch {
-        case t : Throwable => {
-          logInfo(s"Error converting ${curfname}: " + t.toString)
-          break
+      while ( curentry != null) {
+        logInfo(s"Processing ${curentry.getName} in ${curfname}")
+
+        try {
+          val tempout = new FileOutputStream( new File(tempfname2))
+          IOUtils.copy(archive, tempout)
+          tempout.close()
+          val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
+          if (tempresult.isDefined) { results += tempresult.get}
+        } catch {
+          case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curfname}")
+        } finally {
+          // always delete the temporary file
+          val tempfile = new File(tempfname2)
+          if ( tempfile.exists() ) {
+            Files.delete(tempfile.toPath)
+          }
         }
+        curentry = archive.getNextTarEntry
       }
+    }
 
-      // flatten all the variable we care about into one long vector and a mask of missing values
-      logInfo("Extracting desired information from ${ncfname.getFileName.toString}")
-      try {
-        val (rowvector, indices) = vectorizeVariables(tempfname, fieldnames)
-        results += Tuple3(curfname, rowvector, indices)
-      } catch {
-        case NonFatal(t) => logInfo(s"Error extracting variables from ${curfname}: " + t.toString) 
-      }
-
-      Files.delete(Paths.get(tempfname))
-    }}
     results.toIterator
+  }
+
+  // given the name of an input grib file, a string consisting of comma-separated variable names, and a name for temporary file,
+  // returns the name of the file, a vector containing the values of the desired variables, and a mask indicating which entries of
+  // the desired variables are missing
+  def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Tuple3[String, Array[Float], Array[Boolean]]] = {
+
+    var result : Option[Tuple3[String, Array[Float], Array[Boolean]]] = None
+
+    logInfo(s"Converting ${inputfname} from GRIB2 to NetCDF, extracting desired variables")
+    try {
+      // convert from grib to netcdf, preserving the variables we care about 
+      val result1 = s"ncl_convert2nc ${inputfname} -v ${fieldnames}".!!
+      logInfo(s"Conversion done")
+
+      // stupid hacky way to get the name of the netcdf file resulting from the ncl_convert2nc command
+      // it is located in the current directory
+      val ncfname = ("""\w+""".r findFirstIn Paths.get(inputfname).getFileName.toString).get + ".nc"
+      Files.move(Paths.get(ncfname), Paths.get(tempfname))
+    } catch {
+      case t : Throwable => {
+        logInfo(s"Error converting ${inputfname}: " + t.toString)
+        break
+      }
+    }
+
+    // flatten all the variable we care about into one long vector and a mask of missing values
+    logInfo(s"Extracting desired information from ${inputfname}")
+    try {
+      val (rowvector, indices) = vectorizeVariables(tempfname, fieldnames)
+      result = Some(inputfname, rowvector, indices)
+    } catch {
+      case NonFatal(t) => logInfo(s"Error extracting variables from ${inputfname}: " + t.toString) 
+    }
+
+    Files.delete(Paths.get(tempfname))
+    logInfo(s"Deleted temporary file $tempfname")
+
+    result
   }
 
   // Given a filename for a netcdf dataset, and a common-separated list of names of variables,
   // extracts those variables, flattens them into a long vector and drops missing values
-  // returns this vector, and the flattened array of boolean masks indicating which values were dropped 
+  // returns this vector, and the flattened array of boolean masks indicating which values were missing 
   def vectorizeVariables(fname: String, fieldnames: String) : Tuple2[Array[Float], Array[Boolean]] = {
     val fields = fieldnames.split(",") 
     val valueaccumulator = ArrayBuffer[Float]()
@@ -130,6 +178,7 @@ object convertGribToParquet extends Logging {
       }
     }
 
+    logInfo(s"Done loading variables")
     fin.close
     (valueaccumulator.toArray, maskaccumulator.toArray)
   }
