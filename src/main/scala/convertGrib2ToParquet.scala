@@ -63,6 +63,8 @@ object convertGribToParquet extends Logging {
     val maxfilesperpartition = 1
     val fnamesRDD = sc.parallelize(fnames, ceil(fnames.length.toFloat/maxfilesperpartition).toInt)
 
+//    fnamesRDD = sc.parallelize(fnamesRDD.collect.take(1))
+
     val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index)).toDF
     results.saveAsParquetFile(outputdir)
   }
@@ -79,7 +81,7 @@ object convertGribToParquet extends Logging {
     // process non-tar files
     for(curpair <- filepairs.filter(pair => !(pair._1).endsWith(".tar"))) {
       val tempresult = getDataFromFile(curpair._1, fieldnames, tempfname) 
-      if (tempresult.isDefined) { results += tempresult.get}
+      if (tempresult.isDefined) { results += Tuple2(curpair._1, tempresult.get)}
     }
 
     // process tar files
@@ -98,7 +100,7 @@ object convertGribToParquet extends Logging {
         IOUtils.copy(archive, tempout)
         tempout.close()
         val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
-        if (tempresult.isDefined) { results += tempresult.get}
+        if (tempresult.isDefined) { results += Tuple2(curentry.getName, tempresult.get)}
       } catch {
         case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curpair._1}")
       } finally {
@@ -116,9 +118,9 @@ object convertGribToParquet extends Logging {
   // given the name of an input grib file, a string consisting of comma-separated variable names, and a name for temporary file,
   // returns the name of the file, a vector containing the values of the desired variables, and a mask indicating which entries of
   // the desired variables are missing
-  def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Tuple2[String, Array[Float]]] = {
+  def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Array[Float]] = {
 
-    var result : Option[Tuple2[String, Array[Float]]] = None
+    var result : Option[Array[Float]] = None
 
     logInfo(s"Converting ${inputfname} from GRIB2 to NetCDF, extracting desired variables")
     try {
@@ -141,7 +143,7 @@ object convertGribToParquet extends Logging {
     logInfo(s"Extracting desired information from ${inputfname}")
     try {
       val rowvector = vectorizeVariables(tempfname, fieldnames)
-      result = Some(inputfname, rowvector)
+      result = Some(rowvector)
     } catch {
       case NonFatal(t) => logInfo(s"Error extracting variables from ${inputfname}: " + t.toString) 
     }
@@ -157,7 +159,7 @@ object convertGribToParquet extends Logging {
   // returns this vector, and the flattened array of boolean masks indicating which values were missing 
   def vectorizeVariables(fname: String, fieldnames: String) : Array[Float] = {
     val fields = fieldnames.split(",") 
-    val valueaccumulator = ArrayBuffer[Float]()
+    val valueaccumulator = ArrayBuffer[Array[Float]]()
 
     val infileTry = Try(NetcdfFile.open(fname))
     if (!infileTry.isSuccess) {
@@ -176,7 +178,7 @@ object convertGribToParquet extends Logging {
         val cols = variable.getDimension(1).getLength
         var fillValue = variable.findAttribute("_FillValue").getNumericValue.asInstanceOf[Float]
         val vectorizedmatrix = variable.read.copyTo1DJavaArray.asInstanceOf[Array[Float]]
-        valueaccumulator ++= vectorizedmatrix
+        valueaccumulator += vectorizedmatrix
         logInfo(s"Loaded $field, a 2D $datatype field with dimensions $dimensions")
       } 
       else if (rank == 3) {
@@ -185,7 +187,7 @@ object convertGribToParquet extends Logging {
         val cols = variable.getDimension(2).getLength
         var fillValue = variable.findAttribute("_FillValue").getNumericValue.asInstanceOf[Float]
         val vectorizedtensor = variable.read.copyTo1DJavaArray.asInstanceOf[Array[Float]]
-        valueaccumulator ++= vectorizedtensor
+        valueaccumulator += vectorizedtensor
         logInfo(s"Loaded $field, a 3D $datatype field with dimensions $dimensions")
       } 
       else {
@@ -193,8 +195,9 @@ object convertGribToParquet extends Logging {
       }
     }
 
-    logInfo(s"Done loading variables")
     fin.close
-    valueaccumulator.toArray
+    var result = valueaccumulator.toArray.flatten
+    logInfo(s"returning an array of size ${4*result.length/math.pow(10, 9)} Gb")
+    result
   }
 }
