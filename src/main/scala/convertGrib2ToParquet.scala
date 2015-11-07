@@ -66,6 +66,7 @@ object convertGribToParquet extends Logging {
 //    fnamesRDD = sc.parallelize(fnamesRDD.collect.take(1))
 
     val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index)).toDF
+    results.select("_1").foreach(println)
     results.saveAsParquetFile(outputdir)
   }
 
