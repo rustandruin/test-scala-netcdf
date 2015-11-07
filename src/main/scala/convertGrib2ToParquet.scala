@@ -58,15 +58,16 @@ object convertGribToParquet extends Logging {
         }
       ).collect()
 
+    logInfo(sc.textFile(filelistfname).collect().mkString(","))
+
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver
-    val maxfilesperpartition = 1
+    val maxfilesperpartition = 10
     val fnamesRDD = sc.parallelize(fnames, ceil(fnames.length.toFloat/maxfilesperpartition).toInt)
 
 //    fnamesRDD = sc.parallelize(fnamesRDD.collect.take(1))
 
     val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index)).toDF
-    results.select("_1").foreach(println)
     results.saveAsParquetFile(outputdir)
   }
 

@@ -1,0 +1,12 @@
+for EC2:
+
+install ncl by dlling RHEL binary ON ALL NODES
+
+export PATH=$PATH:~/spark/bin:~/local/bin:~/ephemeral-hdfs/bin
+export NCARG_ROOT=~/local
+
+set paths on all spark executors by adding appropriate lines to
+spark/conf/spark-env.sh on all executors
+load the filenamelist and the grb2 files into HDFS
+
+
