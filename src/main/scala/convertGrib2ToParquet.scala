@@ -70,16 +70,20 @@ object convertGribToParquet {
         }
       ).collect()
 
+    // at .2Gb/file, 300 files can be stored on the driver if it has 60Gb of memory, so work in chunks of slightly fewer
+    // to account for serialization, duplication, and other overheads
+    //for(chunk <- fnames.grouped(200)) {
+    for( chunk <- Array(fnames)) {
 
-    // ensure that the data extracted from the files in each partition can be held in memory on the
-    // executors and the driver
-    val fnamesRDD = sc.parallelize(fnames, ceil(fnames.length.toFloat/numfilesperpartition).toInt)
+    	// ensure that the data extracted from the files in each partition can be held in memory on the
+    	// executors and the driver
+    	val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
 
-    logInfo(fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
+    	logInfo("Processing chunk of files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
-    val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index))
-    logInfo(results.collect.head._2.length.toString)
-    results.toDF.saveAsParquetFile(outputdir)
+    	val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index))
+    	results.toDF.write.mode("append").parquet(outputdir)
+     }
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
