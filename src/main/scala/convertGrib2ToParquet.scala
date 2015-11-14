@@ -25,7 +25,11 @@ import breeze.linalg.{DenseVector, DenseMatrix}
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.io.IOUtils
 
-object convertGribToParquet extends Logging {
+import org.apache.log4j.Logger
+
+object convertGribToParquet {
+
+  private val mylogger = Logger.getLogger("conversion")
 
   def main(args: Array[String]) = {
     val conf = new SparkConf().setAppName("convertGribToParquet")
@@ -34,9 +38,14 @@ object convertGribToParquet extends Logging {
     appMain(sc, args)
   }
 
+  def logInfo(message: String) {
+    mylogger.info(message)
+  }
+
   // first arg: file containing the tars with grb2 files to work on, one per line
   // second arg: comma-separated list of variables to use
   // third arg: directory to place the output in
+  // fourth arg: number of files per partition
   def appMain(sc : SparkContext, args: Array[String]) {
 
     val sqlContext = new SQLContext(sc)
@@ -45,6 +54,9 @@ object convertGribToParquet extends Logging {
     val filelistfname = args(0)
     val variablenames = args(1)
     val outputdir = args(2)
+    val numfilesperpartition = args(3).toInt
+
+    logInfo(sc.textFile(filelistfname).collect().mkString(","))
 
     val fnames = sc.parallelize(sc.textFile(filelistfname).collect()).flatMap( 
       fname => 
@@ -58,17 +70,16 @@ object convertGribToParquet extends Logging {
         }
       ).collect()
 
-    logInfo(sc.textFile(filelistfname).collect().mkString(","))
 
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver
-    val maxfilesperpartition = 10
-    val fnamesRDD = sc.parallelize(fnames, ceil(fnames.length.toFloat/maxfilesperpartition).toInt)
+    val fnamesRDD = sc.parallelize(fnames, ceil(fnames.length.toFloat/numfilesperpartition).toInt)
 
-//    fnamesRDD = sc.parallelize(fnamesRDD.collect.take(1))
+    logInfo(fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
-    val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index)).toDF
-    results.saveAsParquetFile(outputdir)
+    val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index))
+    logInfo(results.collect.head._2.length.toString)
+    results.toDF.saveAsParquetFile(outputdir)
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
@@ -83,6 +94,7 @@ object convertGribToParquet extends Logging {
     // process non-tar files
     for(curpair <- filepairs.filter(pair => !(pair._1).endsWith(".tar"))) {
       val tempresult = getDataFromFile(curpair._1, fieldnames, tempfname) 
+      logInfo("processing a non-tar file")
       if (tempresult.isDefined) { results += Tuple2(curpair._1, tempresult.get)}
     }
 
@@ -114,6 +126,7 @@ object convertGribToParquet extends Logging {
       }
     }
 
+    logInfo(s"Results have length ${results.length}")
     results.toIterator
   }
 
@@ -123,6 +136,7 @@ object convertGribToParquet extends Logging {
   def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Array[Float]] = {
 
     var result : Option[Array[Float]] = None
+    var ncfname = ""
 
     logInfo(s"Converting ${inputfname} from GRIB2 to NetCDF, extracting desired variables")
     try {
@@ -132,12 +146,13 @@ object convertGribToParquet extends Logging {
 
       // stupid hacky way to get the name of the netcdf file resulting from the ncl_convert2nc command
       // it is located in the current directory
-      val ncfname = ("""\w+""".r findFirstIn Paths.get(inputfname).getFileName.toString).get + ".nc"
+      //ncfname = ("""\w+""".r findFirstIn Paths.get(inputfname).getFileName.toString).get + ".nc"
+      ncfname = Paths.get((""".grb2$""".r replaceFirstIn (Paths.get(inputfname).getFileName.toString, ".nc"))).getFileName.toString
       Files.move(Paths.get(ncfname), Paths.get(tempfname))
     } catch {
       case t : Throwable => {
-        logInfo(s"Error converting ${inputfname}: " + t.toString)
-        break
+        logInfo(s"Error converting ${inputfname} (stored in $ncfname): " + t.toString)
+	return result
       }
     }
 
