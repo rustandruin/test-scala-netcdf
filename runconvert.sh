@@ -2,17 +2,27 @@
 
 JARFILE=$1
 VARNAMES=$2
-FILELISTFNAME="completefilelist"
+FILELISTFNAME="debugfilelist"
 NUMFILESPERPARTITION=3
 
 DIR="$(cd "`dirname "$0"`"; pwd)"
 LOGDIR="$DIR/eventLogs"
-LOGFILE="fullrun.log"
-OUTPUTDIR="CFSRAparquet"
+LOGFILE="debugrun.log"
+OUTPUTDIR="debugdata"
 
 MASTER=$SPARKURL
 
-# expects to be run on Edison with mppwidth=480 
+# expects to be run on Edison with mppwidth=480 for production
+#  --driver-memory 15G \
+#  --num-executors 119 \
+#  --executor-cores 4 \
+#  --executor-memory 10G \
+
+# debug settings on Edison with mppwidth=120
+#  --driver-memory 15G \
+#  --num-executors 29 \
+#  --executor-cores 4 \
+#  --executor-memory 10G \
 
 spark-submit --verbose \
   --master $MASTER \

@@ -40,6 +40,7 @@ object convertGribToParquet {
 
   def logInfo(message: String) {
     mylogger.info(message)
+    println(message)
   }
 
   // first arg: file containing the tars with grb2 files to work on, one per line
@@ -56,7 +57,7 @@ object convertGribToParquet {
     val outputdir = args(2)
     val numfilesperpartition = args(3).toInt
 
-    logInfo(sc.textFile(filelistfname).collect().mkString(","))
+    //logInfo(sc.textFile(filelistfname).collect().mkString(","))
 
     val fnames = sc.parallelize(sc.textFile(filelistfname).collect()).flatMap( 
       fname => 
@@ -68,26 +69,22 @@ object convertGribToParquet {
           while ( archive.getNextTarEntry != null) { numentries += 1}
           List.range(0, numentries).map(s => (fname, s))
         }
-      ).collect()
+      ).collect
 
-    // at .2Gb/file, 300 files can be stored on the driver if it has 60Gb of memory, so work in chunks of slightly fewer
-    // to account for serialization, duplication, and other overheads
-    //for(chunk <- fnames.grouped(200)) {
-    for( chunk <- Array(fnames)) {
+    for( chunk <- Array(fnames) ) {
+    // ensure that the data extracted from the files in each partition can be held in memory on the
+    // executors and the driver
+    val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
 
-    	// ensure that the data extracted from the files in each partition can be held in memory on the
-    	// executors and the driver
-    	val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
+    logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
-    	logInfo("Processing chunk of files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
-
-    	val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => convertToParquet(fnames, variablenames, index))
-    	results.toDF.write.mode("append").parquet(outputdir)
-     }
+    val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(fnames, variablenames, index))
+    results.toDF.write.mode("append").parquet(outputdir)
+	}
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
-  def convertToParquet( filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
+  def extractData( filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
     val filepairs = filepairsIter.toArray
     val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
     val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")

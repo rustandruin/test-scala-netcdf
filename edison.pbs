@@ -1,9 +1,10 @@
 #!/bin/bash -l
-#PBS -q ccm_queue
-#PBS -l mppwidth=480
-#PBS -l walltime=24:00:00 
+#PBS -q ccm_int
+#PBS -l mppwidth=120
+#PBS -l walltime=00:13:00 
 #PBS -e conversionjob_$PBS_JOBID.err
 #PBS -o conversionjob_$PBS_JOBID.out
+#PBS -m abe
 cd $PBS_O_WORKDIR
 module load spark/1.5.0 sbt ncl
 env | tee $HOME/.ssh/environment
