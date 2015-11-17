@@ -57,9 +57,14 @@ object convertGribToParquet {
     val outputdir = args(2)
     val numfilesperpartition = args(3).toInt
 
-    //logInfo(sc.textFile(filelistfname).collect().mkString(","))
+    val filenamelist = sc.textFile(filelistfname).collect
+    logInfo("Requested conversion of " + filenamelist.length.toString + " physical files")
 
-    val fnames = sc.parallelize(sc.textFile(filelistfname).collect()).flatMap( 
+    val filePairsFname = "allfilepairs"
+    val fnames = if (Files.exists(Paths.get(filePairsFname))) { 
+      sc.textFile(filePairsFname).map(str => str.split(" ")).map(pair => (pair(0), pair(1).toInt)).collect 
+    } else {
+      val filenames = sc.parallelize(filenamelist).flatMap( 
       fname => 
         if (!fname.endsWith(".tar")) { 
           List((fname, 0)) 
@@ -70,17 +75,42 @@ object convertGribToParquet {
           List.range(0, numentries).map(s => (fname, s))
         }
       ).collect
+      sc.parallelize(filenames).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
+      filenames
+   }
 
-    for( chunk <- Array(fnames) ) {
+    val basefilelistname = "convertedfilelist"
+    val existingPartitions = (new File(".")).listFiles.filter(file => file.getName.startsWith(basefilelistname)).map(fname => fname.getName)
+    if (existingPartitions.length > 0) logInfo(s"""There are existing file partitions: ${existingPartitions.mkString(", ")}""")
+    var partitionNumber = if (existingPartitions.length > 0) (existingPartitions.map(fname => fname.stripPrefix(basefilelistname).toInt).max + 1 ) else 0
+    logInfo(s"Number of next partition to be saved is ${existingPartitions.length}")
+    val unconvertedPairs = if (existingPartitions.length == 0) fnames else {
+      val convertedPairs = sc.textFile(basefilelistname + "*").collect.map(str => str.split(" ")).map(pair => (pair(0), pair(1).toInt))
+      fnames.filterNot(pair => convertedPairs.exists(p => (p._1 == pair._1) && (p._2 == pair._2)))
+    }
+
+    logInfo("This entails the conversion of " + unconvertedPairs.length.toString + " grb files in total")
+
     // ensure that the data extracted from the files in each partition can be held in memory on the
-    // executors and the driver
-    val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
+    // executors and the driver; a collection of 210 tar files seems to work 
+    // (on Edison, with mppwidth=288 and using 70 executors with 10G each and a driver with 60G)
+    val chunks = unconvertedPairs.grouped(210)
+    for( chunk <- chunks ) {
+      System.gc // ask for garbage collection
+      val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
+      logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
-    logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
+      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(fnames, variablenames, index))
+      results.toDF.write.parquet(outputdir + partitionNumber.toString)
 
-    val results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(fnames, variablenames, index))
-    results.toDF.write.mode("append").parquet(outputdir)
-	}
+      results = sc.parallelize(Array(("nil", Array(0.0f)))) // hopefully this will encourage garbage collection
+
+      fnamesRDD.map( pair => s"${pair._1} ${pair._2}").saveAsTextFile(basefilelistname + partitionNumber.toString)
+      logInfo(s"Wrote out partition number $partitionNumber")
+      partitionNumber = partitionNumber + 1
+      System.gc // ask for garbage collection
+    }
+
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
@@ -134,8 +164,7 @@ object convertGribToParquet {
   // given the name of an input grib file, a string consisting of comma-separated variable names, and a name for temporary file,
   // returns the name of the file, a vector containing the values of the desired variables, and a mask indicating which entries of
   // the desired variables are missing
-  def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Array[Float]] = {
-
+  def getDataFromFile(inputfname: String, fieldnames: String, tempfname: String) : Option[Array[Float]] = { 
     var result : Option[Array[Float]] = None
     var ncfname = ""
 

@@ -2,32 +2,33 @@
 
 JARFILE=$1
 VARNAMES=$2
-FILELISTFNAME="debugfilelist"
+FILELISTFNAME="completefilelist"
 NUMFILESPERPARTITION=3
 
 DIR="$(cd "`dirname "$0"`"; pwd)"
 LOGDIR="$DIR/eventLogs"
-LOGFILE="debugrun.log"
-OUTPUTDIR="debugdata"
+LOGFILE="fullrun.log"
+OUTPUTDIR="CFSRAparquet"
 
 MASTER=$SPARKURL
 
-# expects to be run on Edison with mppwidth=480 for production
-#  --driver-memory 15G \
-#  --num-executors 119 \
+# expects to be run on Edison with mppwidth=288 for production
+# (because converting 3 files at a time on 70 executors means can convert 210 files by assigning one partition per executors, and each executor takes 4 cores, so need 280 cores + 4 for the driver, and the closest multiple of 24 to that is 288) note 260 files with this setting gives an OOM error run in ccm_queue 
+#  --driver-memory 60G \
+#  --num-executors 70 \
 #  --executor-cores 4 \
 #  --executor-memory 10G \
 
-# debug settings on Edison with mppwidth=120
-#  --driver-memory 15G \
-#  --num-executors 29 \
+# debug settings on Edison with mppwidth=480 (using chunks of 342 files at a time)
+#  --driver-memory 60G \
+#  --num-executors 114 \
 #  --executor-cores 4 \
 #  --executor-memory 10G \
 
 spark-submit --verbose \
   --master $MASTER \
-  --driver-memory 15G \
-  --num-executors 119 \
+  --driver-memory 60G \
+  --num-executors 50 \
   --executor-cores 4 \
   --executor-memory 10G \
   --driver-java-options '-Dlog4j.configuration=log4j.properties' \
