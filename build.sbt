@@ -6,6 +6,7 @@ libraryDependencies ++= Seq(
   "org.apache.spark" %% "spark-core" % "1.5.0" % "provided",
   "org.apache.spark" %% "spark-mllib" % "1.5.0" % "provided",
   "com.github.fommil.netlib" % "all" % "1.1.2",
+  "org.apache.hadoop" % "hadoop-client" % "2.4.0" % "provided", // depends on the version of Hadoop you're using! use hadoop version command to determine
   "org.apache.commons" % "commons-compress" % "1.5",
   "log4j" % "log4j" % "1.2.14", 
   "edu.ucar" % "cdm" % "4.5.5" exclude("commons-logging", "commons-logging"),

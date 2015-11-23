@@ -12,6 +12,9 @@ import scala.util.control.Breaks._
 import scala.util.control.NonFatal
 import scala.math.ceil
 
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.{FileSystem => HFileSystem, Path => HPath}
+
 import java.nio.file.{Files, Paths}
 import java.io.{File, FileInputStream, FileOutputStream}
 import java.util.concurrent.ThreadLocalRandom
@@ -43,42 +46,50 @@ object convertGribToParquet {
     println(message)
   }
 
-  // first arg: file containing the tars with grb2 files to work on, one per line
-  // second arg: comma-separated list of variables to use
-  // third arg: directory to place the output in
-  // fourth arg: number of files per partition
+  // first arg: location of all the tars
+  // second arg: file containing the tars with grb2 files to work on, one per line
+  // third arg: comma-separated list of variables to use
+  // fourth arg: directory to place the output in
+  // fifth arg: number of files per partition
   def appMain(sc : SparkContext, args: Array[String]) {
 
     val sqlContext = new SQLContext(sc)
     import sqlContext.implicits._
 
-    val filelistfname = args(0)
-    val variablenames = args(1)
-    val outputdir = args(2)
-    val numfilesperpartition = args(3).toInt
+    val roothdfsdir = args(0)
+    val filelistfname = args(1)
+    val variablenames = args(2)
+    val outputdir = args(3)
+    val numfilesperpartition = args(4).toInt
 
     val filenamelist = sc.textFile(filelistfname).collect
     logInfo("Requested conversion of " + filenamelist.length.toString + " physical files")
 
     val filePairsFname = "allfilepairs"
-    val fnames = if (Files.exists(Paths.get(filePairsFname))) { 
+    val fs = HFileSystem.get(sc.hadoopConfiguration)
+    val fnames = if (fs.exists(new HPath(filePairsFname))) { 
       sc.textFile(filePairsFname).map(str => str.split(" ")).map(pair => (pair(0), pair(1).toInt)).collect 
     } else {
+      val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
       val filenames = sc.parallelize(filenamelist).flatMap( 
-      fname => 
+      fname =>  {
+        val conf = new Configuration()
+        conf.set("fs.default.name", hdfsname)
+        val fs = HFileSystem.get(conf)
+
         if (!fname.endsWith(".tar")) { 
           List((fname, 0)) 
         } else {
-          val archive = new TarArchiveInputStream(new FileInputStream(fname))
+          val archive = new TarArchiveInputStream(fs.open(new HPath(roothdfsdir + "/" + fname)))
           var numentries = 0
           while ( archive.getNextTarEntry != null) { numentries += 1}
           List.range(0, numentries).map(s => (fname, s))
         }
-      ).collect
+      }).collect
       sc.parallelize(filenames).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
       filenames
    }
-
+/*
     val basefilelistname = "convertedfilelist"
     val existingPartitions = (new File(".")).listFiles.filter(file => file.getName.startsWith(basefilelistname)).map(fname => fname.getName)
     if (existingPartitions.length > 0) logInfo(s"""There are existing file partitions: ${existingPartitions.mkString(", ")}""")
@@ -88,28 +99,24 @@ object convertGribToParquet {
       val convertedPairs = sc.textFile(basefilelistname + "*").collect.map(str => str.split(" ")).map(pair => (pair(0), pair(1).toInt))
       fnames.filterNot(pair => convertedPairs.exists(p => (p._1 == pair._1) && (p._2 == pair._2)))
     }
+    */
+
+    val unconvertedPairs = fnames
 
     logInfo("This entails the conversion of " + unconvertedPairs.length.toString + " grb files in total")
 
     // ensure that the data extracted from the files in each partition can be held in memory on the
-    // executors and the driver; a collection of 210 tar files seems to work 
-    // (on Edison, with mppwidth=288 and using 70 executors with 10G each and a driver with 60G)
-    val chunks = unconvertedPairs.grouped(210)
-    for( chunk <- chunks ) {
-      System.gc // ask for garbage collection
+    // executors and the driver
+    //val chunks = unconvertedPairs.grouped(210)
+    var partitionNumber = 0
+    for( chunk <- Array(unconvertedPairs) ) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(fnames, variablenames, index))
       results.toDF.write.parquet(outputdir + partitionNumber.toString)
-
-      results = sc.parallelize(Array(("nil", Array(0.0f)))) // hopefully this will encourage garbage collection
-
-      fnamesRDD.map( pair => s"${pair._1} ${pair._2}").saveAsTextFile(basefilelistname + partitionNumber.toString)
-      logInfo(s"Wrote out partition number $partitionNumber")
-      partitionNumber = partitionNumber + 1
-      System.gc // ask for garbage collection
     }
+    */
 
   }
 
