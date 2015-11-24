@@ -102,7 +102,7 @@ object convertGribToParquet {
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     for( chunk <- Array(unconvertedPairs) ) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-      logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
+    //  logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
       results.toDF.write.parquet(outputdir + partitionNumber.toString)
@@ -117,7 +117,7 @@ object convertGribToParquet {
     val filepairs = filepairsIter.toArray
     val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
     //val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
-    val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc", tmpdir)
+    val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc")
     val tempfname = tempfile.getAbsolutePath()
     Files.delete(tempfile.toPath)
 
@@ -136,7 +136,7 @@ object convertGribToParquet {
       while (offset < curpair._2) { offset += 1 }
 
       var curentry = archive.getNextTarEntry
-      val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2", tmpdir)
+      val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2")
       val tempfname2 = tempfile2.getAbsolutePath()
       Files.delete(tempfile2.toPath)
 
@@ -145,9 +145,8 @@ object convertGribToParquet {
         val tempout = new FileOutputStream( new File(tempfname2))
         IOUtils.copy(archive, tempout)
         tempout.close()
-     /*   val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
+        val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
         if (tempresult.isDefined) { results += Tuple2(curentry.getName, tempresult.get)}
-        */
       } catch {
         case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curpair._1} : ${e.getMessage}")
       } finally {

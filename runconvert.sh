@@ -24,6 +24,8 @@ spark-submit --verbose \
   --conf "spark.executor.extraJavaOptions=-Dlog4j.configuration=log4j.properties" \
   --conf spark.eventLog.enabled=true \
   --conf spark.eventLog.dir=$LOGDIR \
+  --conf spark.executorEnv.NCARG_ROOT=/root/ncl \
+  --conf spark.executorEnv.PATH=$PATH:/root/ncl/bin \
   --jars $JARFILE \
   --class org.apache.spark.mllib.linalg.distributed.convertGribToParquet \
   $JARFILE \
