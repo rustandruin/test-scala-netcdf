@@ -99,17 +99,14 @@ object convertGribToParquet {
     logInfo("This entails the conversion of " + unconvertedPairs.length.toString + " grb files in total")
 
     // ensure that the data extracted from the files in each partition can be held in memory on the
-    // executors and the driver
-    //val chunks = unconvertedPairs.grouped(210)
-    var partitionNumber = 0
+    // executors and the driver, and there's enough disk space to convert them
+    val chunks = unconvertedPairs.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
-    for( chunk <- Array(unconvertedPairs) ) {
+    for( chunk <- chunks) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-    //  logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
-      results.toDF.write.parquet(outputdir + partitionNumber.toString)
-      partitionNumber = partitionNumber + 1
+      results.toDF.write.mode("append").parquet(outputdir)
     }
 
   }
@@ -120,7 +117,7 @@ object convertGribToParquet {
     val filepairs = filepairsIter.toArray
     val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
     //val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
-    val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc")
+    val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc", tmpdir)
     val tempfname = tempfile.getAbsolutePath()
     Files.delete(tempfile.toPath)
 
@@ -139,7 +136,7 @@ object convertGribToParquet {
       while (offset < curpair._2) { offset += 1 }
 
       var curentry = archive.getNextTarEntry
-      val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2")
+      val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2", tmpdir)
       val tempfname2 = tempfile2.getAbsolutePath()
       Files.delete(tempfile2.toPath)
 
