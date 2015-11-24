@@ -36,7 +36,10 @@ object convertGribToParquet {
   private val tmpdir = new File("/mnt") // write temporary files here b/c the /tmp on spark-ec2's r3.8xlarge instances is too small to store the temp files
 
   def main(args: Array[String]) = {
-    val conf = new SparkConf().setAppName("convertGribToParquet")
+    val conf = new SparkConf()
+       .setAppName("convertGribToParquet")
+       .setExecutorEnv("NCARG_ROOT", "/root/ncl")
+       .setExecutorEnv("PATH", System.getenv("PATH") + ":/root/ncl/bin")
     val sc = new SparkContext(conf)
     sys.addShutdownHook({ sc.stop() })
     appMain(sc, args)
