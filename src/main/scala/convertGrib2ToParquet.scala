@@ -33,6 +33,7 @@ import org.apache.log4j.Logger
 object convertGribToParquet {
 
   private val mylogger = Logger.getLogger("conversion")
+  private val tmpdir = new File("/mnt") // write temporary files here b/c the /tmp on spark-ec2's r3.8xlarge instances is too small to store the temp files
 
   def main(args: Array[String]) = {
     val conf = new SparkConf().setAppName("convertGribToParquet")
@@ -86,20 +87,9 @@ object convertGribToParquet {
           List.range(0, numentries).map(s => (fname, s))
         }
       }).collect
-      sc.parallelize(filenames).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
+      sc.parallelize(filenames).map(pair => (roothdfsdir + "/" + pair._1, pair._2)).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
       filenames
-   }
-/*
-    val basefilelistname = "convertedfilelist"
-    val existingPartitions = (new File(".")).listFiles.filter(file => file.getName.startsWith(basefilelistname)).map(fname => fname.getName)
-    if (existingPartitions.length > 0) logInfo(s"""There are existing file partitions: ${existingPartitions.mkString(", ")}""")
-    var partitionNumber = if (existingPartitions.length > 0) (existingPartitions.map(fname => fname.stripPrefix(basefilelistname).toInt).max + 1 ) else 0
-    logInfo(s"Number of next partition to be saved is ${existingPartitions.length}")
-    val unconvertedPairs = if (existingPartitions.length == 0) fnames else {
-      val convertedPairs = sc.textFile(basefilelistname + "*").collect.map(str => str.split(" ")).map(pair => (pair(0), pair(1).toInt))
-      fnames.filterNot(pair => convertedPairs.exists(p => (p._1 == pair._1) && (p._2 == pair._2)))
     }
-    */
 
     val unconvertedPairs = fnames
 
@@ -109,59 +99,65 @@ object convertGribToParquet {
     // executors and the driver
     //val chunks = unconvertedPairs.grouped(210)
     var partitionNumber = 0
+    val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     for( chunk <- Array(unconvertedPairs) ) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       logInfo("Processing files: " + fnamesRDD.collect().map( pair => s"(${pair._1}, ${pair._2})").mkString(", "))
 
-      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(fnames, variablenames, index))
+      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
       results.toDF.write.parquet(outputdir + partitionNumber.toString)
+      partitionNumber = partitionNumber + 1
     }
-    */
 
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
-  def extractData( filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
+    // PROCESSING OF NON-TAR FILES NOT IMPLEMENTED
+  def extractData(hdfsname : String, filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
     val filepairs = filepairsIter.toArray
     val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
-    val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
+    //val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
+    val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc", tmpdir)
+    val tempfname = tempfile.getAbsolutePath()
+    Files.delete(tempfile.toPath)
 
     logInfo("This partition contains files: " + filepairs.map( pair => s"(${pair._1}, ${pair._2})").mkString(","))
     logInfo(s"Using temporary file name : $tempfname")
 
-    // process non-tar files
-    for(curpair <- filepairs.filter(pair => !(pair._1).endsWith(".tar"))) {
-      val tempresult = getDataFromFile(curpair._1, fieldnames, tempfname) 
-      logInfo("processing a non-tar file")
-      if (tempresult.isDefined) { results += Tuple2(curpair._1, tempresult.get)}
-    }
-
     // process tar files
+    val conf = new Configuration()
+    conf.set("fs.default.name", hdfsname)
+    val fs = HFileSystem.get(conf)
+
     for(curpair <- filepairs.filter(pair => (pair._1).endsWith(".tar"))){
       logInfo(s"Processing tar file: ${curpair._1}")
-      val archive = new TarArchiveInputStream(new FileInputStream(curpair._1)) 
+      val archive = new TarArchiveInputStream(fs.open(new HPath(curpair._1))) 
       var offset = 0
       while (offset < curpair._2) { offset += 1 }
 
       var curentry = archive.getNextTarEntry
-      val tempfname2 = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "grb2")
+      val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2", tmpdir)
+      val tempfname2 = tempfile2.getAbsolutePath()
+      Files.delete(tempfile2.toPath)
 
       logInfo(s"Processing ${curentry.getName} in ${curpair._1}")
       try {
         val tempout = new FileOutputStream( new File(tempfname2))
         IOUtils.copy(archive, tempout)
         tempout.close()
-        val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
+     /*   val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
         if (tempresult.isDefined) { results += Tuple2(curentry.getName, tempresult.get)}
+        */
       } catch {
-        case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curpair._1}")
+        case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curpair._1} : ${e.getMessage}")
       } finally {
-        // always delete the temporary file
+        // always delete the temporary files
         val tempfile = new File(tempfname2)
         if ( tempfile.exists() ) {
           Files.delete(tempfile.toPath)
         }
       }
+      
     }
 
     logInfo(s"Results have length ${results.length}")
