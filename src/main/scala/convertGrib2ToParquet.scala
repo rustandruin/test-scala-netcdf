@@ -94,17 +94,12 @@ object convertGribToParquet {
       filenames
     }
 
-    val unconvertedPairs = fnames
-
-    logInfo("This entails the conversion of " + unconvertedPairs.length.toString + " grb files in total")
-
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
-    val chunks = unconvertedPairs.grouped(609)
+    val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     for( chunk <- chunks) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
       results.toDF.write.mode("append").parquet(outputdir)
     }
