@@ -101,7 +101,7 @@ object convertGribToParquet {
     for( chunk <- Array(chunks.next)) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
-      results.toDF.coalesce(60).write.mode("append").parquet(outputdir)
+      results.toDF.coalesce(120).write.mode("append").parquet(outputdir)
     }
 
   }
