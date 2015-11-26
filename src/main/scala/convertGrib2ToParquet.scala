@@ -98,10 +98,10 @@ object convertGribToParquet {
     // executors and the driver, and there's enough disk space to convert them
     val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
-    for( chunk <- Array(chunks.next)) {
+    for( chunk <- chunks) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
-      results.toDF.coalesce(120).write.mode("append").parquet(outputdir)
+      results.toDF.coalesce(60).write.mode("append").parquet(outputdir)
     }
 
   }
