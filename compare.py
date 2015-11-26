@@ -19,10 +19,9 @@ variable_names = [ "TCDC_P8_L234_GLL0_avg", "TCDC_P8_L224_GLL0_avg", "TCDC_P8_L2
 subprocess.call(["/root/ephemeral-hdfs/bin/hdfs", "dfs", "-get", hdfsfname, "test.tar"])
 subprocess.call("tar -xvf test.tar", shell=True)
 subprocess.call("rm -f test.tar %s" % " ".join([fname for fname in glob.glob("*.grb2") if fname != recordname]), shell=True)
-print "PATH=$PATH:/root/ncl/bin NCARG_ROOT=/root/ncl ncl_convert2nc %s -v %s" % (recordname, ",".join(variable_names))
 subprocess.call("PATH=$PATH:/root/ncl/bin NCARG_ROOT=/root/ncl ncl_convert2nc %s -v %s" % (recordname, ",".join(variable_names)), shell=True)
-ncfile = netCDF4.Data(ncfname)
 
+ncfile = netCDF4.Dataset(ncfname)
 values = np.asarray([])
 for varname in variable_names:
   curvar = ncfile.variables[varname]
@@ -30,14 +29,14 @@ for varname in variable_names:
     mask = np.ma.masked_equal(curvar[:,:], curvar._FillValue).mask
     if mask:
       print("Some masked values in this 2d variable: %s" % varname)
-    values.extend(curvar[:,:].flatten())
+    values = np.append(values, curvar[:,:].flatten())
   elif curvar.ndim == 3:
     mask = np.ma.masked_equal(curvar[...], curvar._FillValue).mask
     if mask:
       print("Some masked values in this 3d variable: %s" % varname)
-    values.extend(curvar[:,:,:].flatten())
+    values = np.append(values, curvar[:,:,:].flatten())
   else:
     print("What you talking 'bout, Willis?")
 
 print np.linalg.norm(values - parquetvalues)
-
+subprocess.call("rm -f %s %s" % (recordname, ncfname), shell=True)
