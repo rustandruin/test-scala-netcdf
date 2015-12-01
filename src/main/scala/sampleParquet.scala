@@ -7,7 +7,7 @@ import org.apache.spark.sql.{SQLContext, Row}
 import org.msgpack.annotation.Message
 import org.msgpack.ScalaMessagePack
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.WrappedArray
 
 import java.io.FileOutputStream
 
@@ -33,7 +33,7 @@ object sampleParquet {
     val recordname = args(1)
     val outputfname = args(2)
 
-    val measurements = sqlContext.read.parquet(parquetfname).rdd.filter( (row : Row) => row(0) == recordname).first.get(1).asInstanceOf[ArrayBuffer[Float]].toArray
+    val measurements = sqlContext.read.parquet(parquetfname).rdd.filter( (row : Row) => row(0) == recordname).first.get(1).asInstanceOf[WrappedArray[Float]].toArray
     
     val serialized = ScalaMessagePack.write(measurements)
     var out = None : Option[FileOutputStream]
