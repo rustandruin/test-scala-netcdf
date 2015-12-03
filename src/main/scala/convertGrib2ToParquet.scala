@@ -89,8 +89,8 @@ object convertGribToParquet {
           while ( archive.getNextTarEntry != null) { numentries += 1}
           List.range(0, numentries).map(s => (fname, s))
         }
-      }).collect
-      sc.parallelize(filenames).map(pair => (roothdfsdir + "/" + pair._1, pair._2)).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
+      }).collect.map( pair => (roothdfsdir + "/" + pair._1, pair._2))
+      sc.parallelize(filenames).map(pair => s"${pair._1} ${pair._2}").saveAsTextFile(filePairsFname)
       filenames
     }
 
@@ -98,7 +98,7 @@ object convertGribToParquet {
     // executors and the driver, and there's enough disk space to convert them
     val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
-    for( chunk <- chunks) {
+    for( chunk <- Array(chunks.next)) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
       results.toDF.coalesce(60).write.mode("append").parquet(outputdir)
@@ -125,25 +125,28 @@ object convertGribToParquet {
     val fs = HFileSystem.get(conf)
 
     for(curpair <- filepairs.filter(pair => (pair._1).endsWith(".tar"))){
-      logInfo(s"Processing tar file: ${curpair._1}")
       val archive = new TarArchiveInputStream(fs.open(new HPath(curpair._1))) 
       var offset = 0
-      while (offset < curpair._2) { offset += 1 }
+      while (offset < curpair._2) { 
+        archive.getNextTarEntry
+        offset += 1 
+      }
 
-      var curentry = archive.getNextTarEntry
+      val curentry = archive.getNextTarEntry
+      val recordname = curentry.getName
       val tempfile2 = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".grb2", tmpdir)
       val tempfname2 = tempfile2.getAbsolutePath()
       Files.delete(tempfile2.toPath)
 
-      logInfo(s"Processing ${curentry.getName} in ${curpair._1}")
+      logInfo(s"Processing ${recordname} in ${curpair._1}, entry ${curpair._2}")
       try {
         val tempout = new FileOutputStream( new File(tempfname2))
         IOUtils.copy(archive, tempout)
         tempout.close()
         val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
-        if (tempresult.isDefined) { results += Tuple2(curentry.getName, tempresult.get)}
+        if (tempresult.isDefined) { results += Tuple2(recordname, tempresult.get)}
       } catch {
-        case e : Throwable => logInfo(s"Error in extracting and processing ${curentry.getName} from ${curpair._1} : ${e.getMessage}")
+        case e : Throwable => logInfo(s"Error in extracting and processing ${recordname} from ${curpair._1} : ${e.getMessage}")
       } finally {
         // always delete the temporary files
         val tempfile = new File(tempfname2)
@@ -151,6 +154,7 @@ object convertGribToParquet {
           Files.delete(tempfile.toPath)
         }
       }
+      archive.close()
       
     }
 
