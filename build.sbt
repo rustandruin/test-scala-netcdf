@@ -32,3 +32,8 @@ lazy val runTestDump = taskKey[Unit]("Extract a record from the parquet matrix a
 runTestDump <<= (assembly in Compile) map {
   (jarFile : File) => s"./runtestdump.sh ${jarFile} ${filename}" !
 }
+
+lazy val runTestMatrixMultiply = taskKey[Unit]("Test multiplying by A and A^T")
+runTestMatrixMultiply <<= (assembly in Compile) map {
+  (jarFile : File) => s"./runtestmultiply.sh ${jarFile}" !
+}
