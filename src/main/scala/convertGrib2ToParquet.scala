@@ -3,10 +3,10 @@ package org.apache.spark.mllib.linalg.distributed
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
 import org.apache.spark.Logging
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.{SQLContext, Row => SQLRow}
 
 import scala.sys.process._
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ArrayBuffer, WrappedArray}
 import scala.util.Try
 import scala.util.control.Breaks._
 import scala.util.control.NonFatal
@@ -23,7 +23,7 @@ import ucar.nc2.{NetcdfFile, Dimension, Variable}
 import ucar.ma2.DataType
 import ucar.ma2.{Array => netcdfArray}
 
-import breeze.linalg.{DenseVector, DenseMatrix}
+import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.io.IOUtils
@@ -109,6 +109,22 @@ object convertGribToParquet {
         results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + idx)
       }
     }
+
+    // take the transpose
+    val numrows = sqlContext.read.parquet(outputdir + 0.toString).count
+    val rownames = ArrayBuffer[String]()
+    for (idx <- 0 until numdivisions) {
+      val chunkofcols = sqlContext.read.parquet(outputdir + idx).rdd.collect
+      rownames ++= chunkofcols.map(row => row(0).asInstanceOf[String]).toArray.asInstanceOf[Array[String]]
+      val rows = chunkofcols.map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray)
+      val numcols = rows(0).length
+      val matrixChunkTranspose = new BDM[Float](numcols, numrows.toInt, rows.flatten) // breeze stores matrices in column-major format
+      val matrixChunkTransposeData = matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => new BDV(v))
+      val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
+      matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir + "transpose") // gives an error about RDD[Array[Float]] not having a toDF function
+    }
+
+    sc.parallelize(rownames.toArray).saveAsTextFile(outputdir + "transposeColNames")
 
   }
 
