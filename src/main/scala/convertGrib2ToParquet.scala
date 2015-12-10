@@ -65,6 +65,7 @@ object convertGribToParquet {
     val variablenames = args(2)
     val outputdir = args(3)
     val numfilesperpartition = args(4).toInt
+    val divisionsize = 200000
 
     val filenamelist = sc.textFile(filelistfname).collect
     logInfo("Requested conversion of " + filenamelist.length.toString + " physical files")
@@ -98,19 +99,24 @@ object convertGribToParquet {
     // executors and the driver, and there's enough disk space to convert them
     val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
+    var numdivisions = 1
     for( chunk <- chunks) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, index))
-      results.toDF.coalesce(60).write.mode("append").parquet(outputdir)
+      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, index)).coalesce(60).cache
+      if (numdivisions == 1)
+        numdivisions = results.first._2.length
+      for (idx <- 0 until numdivisions) {
+        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + idx)
+      }
     }
 
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
     // PROCESSING OF NON-TAR FILES NOT IMPLEMENTED
-  def extractData(hdfsname : String, filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
+  def extractData(hdfsname : String, filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, divisionsize: Int, index: Int) : Iterator[Tuple2[String, Array[Array[Float]]]] = {
     val filepairs = filepairsIter.toArray
-    val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
+    val results = ArrayBuffer[Tuple2[String, Array[Array[Float]]]]()
     //val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
     val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc", tmpdir)
     val tempfname = tempfile.getAbsolutePath()
@@ -144,7 +150,7 @@ object convertGribToParquet {
         IOUtils.copy(archive, tempout)
         tempout.close()
         val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
-        if (tempresult.isDefined) { results += Tuple2(recordname, tempresult.get)}
+        if (tempresult.isDefined) { results += Tuple2(recordname, tempresult.get.grouped(divisionsize).toArray) }
       } catch {
         case e : Throwable => logInfo(s"Error in extracting and processing ${recordname} from ${curpair._1} : ${e.getMessage}")
       } finally {
