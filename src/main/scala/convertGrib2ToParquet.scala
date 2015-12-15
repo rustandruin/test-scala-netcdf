@@ -123,7 +123,7 @@ object convertGribToParquet {
       val matrixChunkTransposeData =
       matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => {
         rowidx = rowidx + 1
-        (rowidx, new BDV(v))
+        (rowidx.toLong, new BDV(v))
       })
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
       matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir + "transpose") // gives an error about RDD[Array[Float]] not having a toDF function
