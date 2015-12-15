@@ -100,7 +100,7 @@ object convertGribToParquet {
     val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     var numdivisions = 1
-    for( chunk <- chunks) {
+    for( chunk <- chunks.toArray.take(2)) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
       var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, index)).coalesce(60).cache
       if (numdivisions == 1)
@@ -113,13 +113,18 @@ object convertGribToParquet {
     // take the transpose
     val numrows = sqlContext.read.parquet(outputdir + 0.toString).count
     val rownames = ArrayBuffer[String]()
+    var rowidx = 0
     for (idx <- 0 until numdivisions) {
       val chunkofcols = sqlContext.read.parquet(outputdir + idx).rdd.collect
       rownames ++= chunkofcols.map(row => row(0).asInstanceOf[String]).toArray.asInstanceOf[Array[String]]
       val rows = chunkofcols.map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray)
       val numcols = rows(0).length
       val matrixChunkTranspose = new BDM[Float](numcols, numrows.toInt, rows.flatten) // breeze stores matrices in column-major format
-      val matrixChunkTransposeData = matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => new BDV(v))
+      val matrixChunkTransposeData =
+      matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => {
+        rowidx = rowidx + 1
+        (rowidx, new BDV(v))
+      })
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
       matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir + "transpose") // gives an error about RDD[Array[Float]] not having a toDF function
     }
