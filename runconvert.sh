@@ -9,7 +9,7 @@ NUMFILESPERPARTITION=3
 DIR="$(cd "`dirname "$0"`"; pwd)"
 LOGDIR="$DIR/eventLogs"
 LOGFILE="fullrun.log"
-OUTPUTDIR=hdfs:///user/root/CFSRAparquetTranspose
+OUTPUTDIR=hdfs:///user/root/CFSRAparquet
 
 # expects to be run on EC2 in standalone mode with 29-execs on r3.8xlarge instances
 # 

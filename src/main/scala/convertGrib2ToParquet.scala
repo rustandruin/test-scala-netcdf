@@ -1,9 +1,19 @@
+// TODO:
+// For complete generality and to avoid issues with missing data:
+// 1. accept a list of variables
+// 2. go over the data once to establish what grid points don't contain data for each of the variables and the sizes of each variable
+// 3. group the variables into chunks of manageable size
+// 4. convert each such group into an RDD and store to disk
+// 5. join these RDDs and store back to disk
+// Should keep track of missing data locations and ordering of the columns corresponding to different dates
+
 package org.apache.spark.mllib.linalg.distributed
 
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkConf
 import org.apache.spark.Logging
 import org.apache.spark.sql.{SQLContext, Row => SQLRow}
+import org.apache.spark.mllib.linalg.{DenseVector => SDV}
 
 import scala.sys.process._
 import scala.collection.mutable.{ArrayBuffer, WrappedArray}
@@ -97,39 +107,51 @@ object convertGribToParquet {
 
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
+    // writes A^T
     val chunks = fnames.grouped(609)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     var numdivisions = 1
-    for( chunk <- chunks.toArray.take(2)) {
+    for( chunk <- chunks) {
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, index)).coalesce(60).cache
+      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, index)).cache
       if (numdivisions == 1)
         numdivisions = results.first._2.length
       for (idx <- 0 until numdivisions) {
-        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + idx)
+        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + "Transpose" + idx)
       }
     }
 
+    /*
     // take the transpose
-    val numrows = sqlContext.read.parquet(outputdir + 0.toString).count
-    val rownames = ArrayBuffer[String]()
-    var rowidx = 0
-    for (idx <- 0 until numdivisions) {
-      val chunkofcols = sqlContext.read.parquet(outputdir + idx).rdd.collect
-      rownames ++= chunkofcols.map(row => row(0).asInstanceOf[String]).toArray.asInstanceOf[Array[String]]
-      val rows = chunkofcols.map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray)
-      val numcols = rows(0).length
-      val matrixChunkTranspose = new BDM[Float](numcols, numrows.toInt, rows.flatten) // breeze stores matrices in column-major format
+    val tempdf = sqlContext.read.parquet(outputdir + "Transpose" + 0.toString)
+    val numrows = tempdf.count // number of rows in A^T
+    val rownames = tempdf.rdd.map(row => row(0).asInstanceOf[String]) // the names of the files corresponding to the rows of A^T
+    rownames.saveAsTextFile(outputdir + "ColNames")
+    var rowidx = 0 // the current row in A
+
+    //for (idx <- 0 until numdivisions) {
+    for (idx <- 0 until 275) {
+      // reads a numrows-by-numcols chunk of the columns of A^T
+      val chunkofcols = sqlContext.read.parquet(outputdir + "Transpose" + idx.toString).rdd.
+                          map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray).collect.toArray 
+      val numcols = chunkofcols(0).length 
+
+      // uses the fact that breeze stores matrices in column-major format to form the transpose of the chunk of columns of A^T
+      val matrixChunkTranspose = new BDM[Float](numcols.toInt, numrows.toInt, chunkofcols.flatten)
+
+
+      // uses the fact that breeze stores matrices in column-major format to extract the rows of the chunk of A
       val matrixChunkTransposeData =
       matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => {
         rowidx = rowidx + 1
-        (rowidx.toLong, new BDV(v))
+        val dv = v map {_.toDouble}
+        (rowidx.toLong, new SDV(dv))
       })
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
-      matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir + "transpose") // gives an error about RDD[Array[Float]] not having a toDF function
+      matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir)
     }
+    */
 
-    sc.parallelize(rownames.toArray).saveAsTextFile(outputdir + "transposeColNames")
 
   }
 

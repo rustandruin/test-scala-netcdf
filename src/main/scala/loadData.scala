@@ -12,6 +12,7 @@ import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM}
 import java.text.SimpleDateFormat
 
 import scala.collection.mutable.{Map, WrappedArray}
+import scala.reflect.runtime.universe._
 
 import org.apache.log4j.Logger
 
@@ -53,27 +54,27 @@ object testMatMultiply {
     // interpreting the results
     val outfname = "hdfs:///user/root/sortedrownames"
     sc.parallelize(sorteddates).saveAsTextFile(outfname)
+    /*
 
     // this lookup table maps the rowname to the row index in the matrix A (e.g. earliest date maps to 0, latest to last row)
     val indexLUT = Map[String, Long]()
     sorteddates.view.zipWithIndex foreach { case (rowname, index) => indexLUT += (rowname -> index) }
 
     // load the data into a row matrix
-    val rows = {
-      sqlContext.read.parquet(datafname).rdd.map { 
-        case SQLRow(rowname: String, values: WrappedArray[Float]) =>
-          val vector = new DenseVector(values.toArray.map(v => v.toDouble)) // DenseVectors have to be doubles
-          new IndexedRow(indexLUT(rowname), vector)
-        }
-    }
+    val rows = sqlContext.read.parquet(datafname).rdd.map { row => {
+      val v = row(1).asInstanceOf[WrappedArray[Float]]
+      val vDouble = v.map( x => x.toDouble).toArray
+      new IndexedRow(indexLUT(row(0).asInstanceOf[String]), new DenseVector(vDouble))
+    }}
 
     val nrows : Long = 46752
     val ncols = 54843120
-    val A = new IndexedRowMatrix(rows, nrows, ncols)
-    A.rows.unpersist()
+    //val A = new IndexedRowMatrix(rows, nrows, ncols)
+    //A.rows.unpersist()
 
-    val x = new DenseMatrix(ncols, 1, BDV.rand(ncols).data)
-    A.multiply(x).rows.collect
+    //val x = new DenseMatrix(ncols, 1, BDV.rand(ncols).data)
+    //A.multiply(x).rows.collect
+    */
   }
 
 }
