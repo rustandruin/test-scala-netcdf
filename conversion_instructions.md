@@ -34,7 +34,7 @@ hadoop distcp s3n://agittens/CFSRArawtars CFSRArawtars
 Now `Ctrl-A D` to detach this screen session. The transfer may take an hour or more to complete, and can be monitored through the Yarn UI.
 
 ## Setup the conversion code
-We need to install sbt and retreive and compile the conversion code. We'll do this concurrently in another screen session. We set up the git user name and email in case we want to make commits (skippable if you're not making any commits), and create a log directory and upload a file to HDFS, both of the which the conversion code assumes have been done before it is run. Next we run the `sbt assembly` command to get sbt to pull in all the required packages and compile the code.
+We need to install sbt and retreive and compile the conversion code. We'll do this concurrently in another screen session. We set up the git user name and email in case we want to make commits (skippable if you're not making any commits) and upload a file to HDFS which the conversion code needs. Next we run the `sbt assembly` command to get sbt to pull in all the required packages and compile the code.
 
 ```sh
 screen -S setupconversioncode
@@ -44,7 +44,6 @@ git clone https://github.com/rustandruin/test-scala-netcdf.git
 git config --global user.name "Alex Gittens"
 git config --global user.email "gittens@icsi.berkeley.edu"
 cd test-scala-netcdf
-mkdir eventLogs
 hdfs dfs -put completefilelist
 sbt assembly
 ```
@@ -72,3 +71,9 @@ cd /root/test-scala-netcdf
 sbt runConvert
 ```
 This will probably take 18 -- 24 hours to generate the final parquet file needed to compute the EOFs of the climate data. Use `Ctrl-A D` to detach the screen, logout from the master, and you can monitor the progress through the Spark UI.     
+## View the logs in the UI
+Sometimes the Spark UI says that it can't find the logs for a completed Spark job, so you need to manually start the server with
+
+```sh
+SPARK_HISTORY_OPTS="-Dspark.history.fs.logDirectory=/mnt2/climateLogs/eventLogs" /root/spark/sbin/start-history-server.sh
+```

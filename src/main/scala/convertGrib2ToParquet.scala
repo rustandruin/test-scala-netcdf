@@ -108,7 +108,7 @@ object convertGribToParquet {
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
     // writes A^T
-    val chunks = fnames.grouped(609)
+    val chunks = fnames.grouped(numfilesperpartition*203) // find a way to figure the number of executors out automatically
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     var numdivisions = 1
     for( chunk <- chunks) {
@@ -121,7 +121,6 @@ object convertGribToParquet {
       }
     }
 
-    /*
     // take the transpose
     val tempdf = sqlContext.read.parquet(outputdir + "Transpose" + 0.toString)
     val numrows = tempdf.count // number of rows in A^T
@@ -129,8 +128,7 @@ object convertGribToParquet {
     rownames.saveAsTextFile(outputdir + "ColNames")
     var rowidx = 0 // the current row in A
 
-    //for (idx <- 0 until numdivisions) {
-    for (idx <- 0 until 275) {
+    for (idx <- 0 until numdivisions) {
       // reads a numrows-by-numcols chunk of the columns of A^T
       val chunkofcols = sqlContext.read.parquet(outputdir + "Transpose" + idx.toString).rdd.
                           map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray).collect.toArray 
@@ -138,7 +136,6 @@ object convertGribToParquet {
 
       // uses the fact that breeze stores matrices in column-major format to form the transpose of the chunk of columns of A^T
       val matrixChunkTranspose = new BDM[Float](numcols.toInt, numrows.toInt, chunkofcols.flatten)
-
 
       // uses the fact that breeze stores matrices in column-major format to extract the rows of the chunk of A
       val matrixChunkTransposeData =
@@ -150,7 +147,6 @@ object convertGribToParquet {
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
       matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir)
     }
-    */
 
 
   }
