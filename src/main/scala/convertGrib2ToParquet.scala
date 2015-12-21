@@ -107,6 +107,9 @@ object convertGribToParquet {
       filenames
     }
 
+    sqlContext.setConf("spark.sql.avro.compression.codec", "deflate")
+    sqlContext.setConf("spark.sql.avro.deflate.level", "5")
+
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
     // writes A^T
