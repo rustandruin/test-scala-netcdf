@@ -111,14 +111,18 @@ object convertGribToParquet {
     val chunks = fnames.grouped(numfilesperpartition*203) // find a way to figure the number of executors out automatically
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     var numdivisions = 1
-    for( chunk <- chunks) {
+    val totalNumberChunks = chunks.size
+    for( indexedChunk <- chunks.zipWithIndex) {
+      val chunk = indexedChunk._1
+      val index = indexedChunk._2
       val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-      var results = fnamesRDD.mapPartitionsWithIndex((index, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, index)).cache
+      var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, partitionNumber)).cache
       if (numdivisions == 1)
         numdivisions = results.first._2.length
       for (idx <- 0 until numdivisions) {
         results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + "Transpose" + idx)
       }
+      logInfo(s"${index.toDouble/totalNumberChunks * 100}% done with constructing the transpose of A: wrote part ${index} of ${totalNumberChunks}")
     }
 
     // take the transpose
@@ -161,8 +165,8 @@ object convertGribToParquet {
     val tempfname = tempfile.getAbsolutePath()
     Files.delete(tempfile.toPath)
 
-    logInfo("This partition contains files: " + filepairs.map( pair => s"(${pair._1}, ${pair._2})").mkString(","))
-    logInfo(s"Using temporary file name : $tempfname")
+    //logInfo("This partition contains files: " + filepairs.map( pair => s"(${pair._1}, ${pair._2})").mkString(","))
+    //logInfo(s"Using temporary file name : $tempfname")
 
     // process tar files
     val conf = new Configuration()
@@ -203,7 +207,6 @@ object convertGribToParquet {
       
     }
 
-    logInfo(s"Results have length ${results.length}")
     results.toIterator
   }
 
@@ -214,11 +217,11 @@ object convertGribToParquet {
     var result : Option[Array[Float]] = None
     var ncfname = ""
 
-    logInfo(s"Converting ${inputfname} from GRIB2 to NetCDF, extracting desired variables")
+    //logInfo(s"Converting ${inputfname} from GRIB2 to NetCDF, extracting desired variables")
     try {
       // convert from grib to netcdf, preserving the variables we care about 
       val result1 = s"ncl_convert2nc ${inputfname} -v ${fieldnames}".!!
-      logInfo(s"Conversion done")
+      //logInfo(s"Conversion done")
 
       // stupid hacky way to get the name of the netcdf file resulting from the ncl_convert2nc command
       // it is located in the current directory
@@ -233,7 +236,7 @@ object convertGribToParquet {
     }
 
     // flatten all the variable we care about into one long vector and a mask of missing values
-    logInfo(s"Extracting desired information from ${inputfname}")
+    //logInfo(s"Extracting desired information from ${inputfname}")
     try {
       val rowvector = vectorizeVariables(tempfname, fieldnames)
       result = Some(rowvector)
@@ -242,7 +245,7 @@ object convertGribToParquet {
     }
 
     Files.delete(Paths.get(tempfname))
-    logInfo(s"Deleted temporary file $tempfname")
+    //logInfo(s"Deleted temporary file $tempfname")
 
     result
   }
@@ -272,7 +275,7 @@ object convertGribToParquet {
         var fillValue = variable.findAttribute("_FillValue").getNumericValue.asInstanceOf[Float]
         val vectorizedmatrix = variable.read.copyTo1DJavaArray.asInstanceOf[Array[Float]]
         valueaccumulator += vectorizedmatrix
-        logInfo(s"Loaded $field, a 2D $datatype field with dimensions $dimensions")
+        //logInfo(s"Loaded $field, a 2D $datatype field with dimensions $dimensions")
       } 
       else if (rank == 3) {
         val depth = variable.getDimension(0).getLength
@@ -281,7 +284,7 @@ object convertGribToParquet {
         var fillValue = variable.findAttribute("_FillValue").getNumericValue.asInstanceOf[Float]
         val vectorizedtensor = variable.read.copyTo1DJavaArray.asInstanceOf[Array[Float]]
         valueaccumulator += vectorizedtensor
-        logInfo(s"Loaded $field, a 3D $datatype field with dimensions $dimensions")
+        //logInfo(s"Loaded $field, a 3D $datatype field with dimensions $dimensions")
       } 
       else {
         logInfo(s"don't know what this is: $field")
@@ -290,7 +293,7 @@ object convertGribToParquet {
 
     fin.close
     var result = valueaccumulator.toArray.flatten
-    logInfo(s"returning an array of size ${4*result.length/math.pow(10, 9)} Gb")
+    //logInfo(s"returning an array of size ${4*result.length/math.pow(10, 9)} Gb")
     result
   }
 }
