@@ -38,6 +38,8 @@ import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.io.IOUtils
 
+import com.databricks.spark.avro._
+
 import org.apache.log4j.Logger
 
 object convertGribToParquet {
@@ -120,13 +122,13 @@ object convertGribToParquet {
       if (numdivisions == 1)
         numdivisions = results.first._2.length
       for (idx <- 0 until numdivisions) {
-        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").parquet(outputdir + "Transpose" + idx)
+        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").avro(outputdir + "Transpose" + idx)
       }
       logInfo(s"${index.toDouble/totalNumberChunks * 100}% done with constructing the transpose of A: wrote part ${index} of ${totalNumberChunks}")
     }
 
     // take the transpose
-    val tempdf = sqlContext.read.parquet(outputdir + "Transpose" + 0.toString)
+    val tempdf = sqlContext.read.avro(outputdir + "Transpose" + 0.toString)
     val numrows = tempdf.count // number of rows in A^T
     val rownames = tempdf.rdd.map(row => row(0).asInstanceOf[String]) // the names of the files corresponding to the rows of A^T
     rownames.saveAsTextFile(outputdir + "ColNames")
@@ -134,7 +136,7 @@ object convertGribToParquet {
 
     for (idx <- 0 until numdivisions) {
       // reads a numrows-by-numcols chunk of the columns of A^T
-      val chunkofcols = sqlContext.read.parquet(outputdir + "Transpose" + idx.toString).rdd.
+      val chunkofcols = sqlContext.read.avro(outputdir + "Transpose" + idx.toString).rdd.
                           map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray).collect.toArray 
       val numcols = chunkofcols(0).length 
 
@@ -149,7 +151,7 @@ object convertGribToParquet {
         (rowidx.toLong, new SDV(dv))
       })
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
-      matrixChunkTransposeRDD.toDF.write.mode("append").parquet(outputdir)
+      matrixChunkTransposeRDD.toDF.write.mode("append").avro(outputdir)
     }
 
 
