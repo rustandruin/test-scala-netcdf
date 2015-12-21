@@ -10,9 +10,9 @@ FILELISTFNAME=hdfs:///user/root/completefilelist
 NUMFILESPERPARTITION=3
 
 #DIR="$(cd "`dirname "$0"`"; pwd)"
-DIR='/mnt2/climateLogs'
-LOGDIR='$DIR/eventLogs'
-LOGFILE='$DIR/fullrun.log'
+DIR=/mnt2/climateLogs
+LOGDIR=$DIR/eventLogs
+LOGFILE=$DIR/fullrun.log
 OUTPUTDIR=hdfs:///user/root/CFSRAparquet
 mkdir -p $LOGDIR
 
