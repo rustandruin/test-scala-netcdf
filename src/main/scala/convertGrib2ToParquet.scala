@@ -117,6 +117,12 @@ object convertGribToParquet {
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
     var numdivisions = 1
     val totalNumberChunks = chunks.size
+
+    val fnamesRDD = sc.parallelize(fnames, ceil(fnames.size.toDouble/numfilesperpartition).toInt)
+    var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, fnames) => extractData(hdfsname, fnames, variablenames, partitionNumber))
+    results.toDF.write.avro(outputdir + "Transpose")
+
+    /*
     for( indexedChunk <- chunks.zipWithIndex) {
       val chunk = indexedChunk._1
       val index = indexedChunk._2
@@ -156,15 +162,15 @@ object convertGribToParquet {
       val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
       matrixChunkTransposeRDD.toDF.write.mode("append").avro(outputdir)
     }
-
+*/
 
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
     // PROCESSING OF NON-TAR FILES NOT IMPLEMENTED
-  def extractData(hdfsname : String, filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, divisionsize: Int, index: Int) : Iterator[Tuple2[String, Array[Array[Float]]]] = {
+  def extractData(hdfsname : String, filepairsIter: Iterator[Tuple2[String, Int]], fieldnames: String, index: Int) : Iterator[Tuple2[String, Array[Float]]] = {
     val filepairs = filepairsIter.toArray
-    val results = ArrayBuffer[Tuple2[String, Array[Array[Float]]]]()
+    val results = ArrayBuffer[Tuple2[String, Array[Float]]]()
     //val tempfname = "%s.%s".format(ThreadLocalRandom.current.nextLong(Long.MaxValue), "nc")
     val tempfile = File.createTempFile(ThreadLocalRandom.current.nextLong(Long.MaxValue).toString, ".nc", tmpdir)
     val tempfname = tempfile.getAbsolutePath()
@@ -198,7 +204,7 @@ object convertGribToParquet {
         IOUtils.copy(archive, tempout)
         tempout.close()
         val tempresult = getDataFromFile(tempfname2, fieldnames, tempfname) 
-        if (tempresult.isDefined) { results += Tuple2(recordname, tempresult.get.grouped(divisionsize).toArray) }
+        if (tempresult.isDefined) { results += Tuple2(recordname, tempresult.get) }
       } catch {
         case e : Throwable => logInfo(s"Error in extracting and processing ${recordname} from ${curpair._1} : ${e.getMessage}")
       } finally {
