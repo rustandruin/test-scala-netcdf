@@ -77,7 +77,7 @@ object convertGribToParquet {
     val variablenames = args(2)
     val outputdir = args(3)
     val numfilesperpartition = args(4).toInt
-    val divisionsize = 200000
+    val divisionsize = 1000 // number of dates to convert in each chunk
 
     val filenamelist = sc.textFile(filelistfname).collect
     logInfo("Requested conversion of " + filenamelist.length.toString + " physical files")
@@ -113,57 +113,20 @@ object convertGribToParquet {
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
     // writes A^T
-    val chunks = fnames.grouped(numfilesperpartition*203) // find a way to figure the number of executors out automatically
+    val chunks = fnames.grouped(divisionsize)
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
-    var numdivisions = 1
-    val totalNumberChunks = chunks.size
+    var numdivisions = chunks.size
 
-    val fnamesRDD = sc.parallelize(fnames, ceil(fnames.size.toDouble/numfilesperpartition).toInt)
-    var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, fnames) => extractData(hdfsname, fnames, variablenames, partitionNumber))
-    results.toDF.write.avro(outputdir + "Transpose")
-
-    /*
-    for( indexedChunk <- chunks.zipWithIndex) {
+    for (indexedChunk <- chunks.zipWithIndex) {
       val chunk = indexedChunk._1
-      val index = indexedChunk._2
-      val fnamesRDD = sc.parallelize(chunk, ceil(chunk.length.toFloat/numfilesperpartition).toInt)
-      var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, fnames) => extractData(hdfsname, fnames, variablenames, divisionsize, partitionNumber)).cache
-      if (numdivisions == 1)
-        numdivisions = results.first._2.length
-      for (idx <- 0 until numdivisions) {
-        results.map( pair => (pair._1, pair._2(idx))).toDF.write.mode("append").avro(outputdir + "Transpose" + idx)
-      }
-      logInfo(s"${index.toDouble/totalNumberChunks * 100}% done with constructing the transpose of A: wrote part ${index} of ${totalNumberChunks}")
+      val chunkIdx = indexedChunk._2
+      val fnamesRDD = sc.parallelize(chunk, ceil(chunk.size.toDouble/numfilesperpartition).toInt)
+      var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, listoffnames) => extractData(hdfsname, listoffnames, variablenames, partitionNumber))
+      results.toDF.write.avro(outputdir + "Transpose" + chunkIdx)
+      logInfo(s"${chunkIdx.toDouble/numdivisions * 100}% done with constructing the transpose of A: wrote part ${chunkIdx} of ${numdivisions}")
     }
 
-    // take the transpose
-    val tempdf = sqlContext.read.avro(outputdir + "Transpose" + 0.toString)
-    val numrows = tempdf.count // number of rows in A^T
-    val rownames = tempdf.rdd.map(row => row(0).asInstanceOf[String]) // the names of the files corresponding to the rows of A^T
-    rownames.saveAsTextFile(outputdir + "ColNames")
-    var rowidx = 0 // the current row in A
-
-    for (idx <- 0 until numdivisions) {
-      // reads a numrows-by-numcols chunk of the columns of A^T
-      val chunkofcols = sqlContext.read.avro(outputdir + "Transpose" + idx.toString).rdd.
-                          map(row => row(1).asInstanceOf[WrappedArray[Float]].toArray).collect.toArray 
-      val numcols = chunkofcols(0).length 
-
-      // uses the fact that breeze stores matrices in column-major format to form the transpose of the chunk of columns of A^T
-      val matrixChunkTranspose = new BDM[Float](numcols.toInt, numrows.toInt, chunkofcols.flatten)
-
-      // uses the fact that breeze stores matrices in column-major format to extract the rows of the chunk of A
-      val matrixChunkTransposeData =
-      matrixChunkTranspose.t.copy.data.grouped(numrows.toInt).toArray.map(v => {
-        rowidx = rowidx + 1
-        val dv = v map {_.toDouble}
-        (rowidx.toLong, new SDV(dv))
-      })
-      val matrixChunkTransposeRDD = sc.parallelize(matrixChunkTransposeData)
-      matrixChunkTransposeRDD.toDF.write.mode("append").avro(outputdir)
-    }
-*/
-
+    // TODO: take the transpose
   }
 
   // given a group of filenames and the names of the variables to extract, extracts them 
