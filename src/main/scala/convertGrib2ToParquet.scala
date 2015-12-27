@@ -113,19 +113,20 @@ object convertGribToParquet {
     // ensure that the data extracted from the files in each partition can be held in memory on the
     // executors and the driver, and there's enough disk space to convert them
     // writes A^T
-    val chunks = fnames.grouped(divisionsize)
+    val chunks = fnames.grouped(divisionsize).toArray
     val hdfsname = sc.hadoopConfiguration.get("fs.default.name")
-    var numdivisions = chunks.size
+    val numdivisions = chunks.length
 
     for (indexedChunk <- chunks.zipWithIndex) {
+      logInfo(s"${indexedChunk._2}")
       val chunk = indexedChunk._1
       val chunkIdx = indexedChunk._2
-      val fnamesRDD = sc.parallelize(chunk, ceil(chunk.size.toDouble/numfilesperpartition).toInt)
+      val fnamesRDD = sc.parallelize(chunk, 203)
+      logInfo(s"${fnamesRDD.collect}")
       var results = fnamesRDD.mapPartitionsWithIndex((partitionNumber, listoffnames) => extractData(hdfsname, listoffnames, variablenames, partitionNumber))
       results.toDF.write.avro(outputdir + "Transpose" + chunkIdx)
       logInfo(s"${chunkIdx.toDouble/numdivisions * 100}% done with constructing the transpose of A: wrote part ${chunkIdx} of ${numdivisions}")
     }
-
     // TODO: take the transpose
   }
 
