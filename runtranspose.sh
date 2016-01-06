@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 
 JARFILE=$1
-HDFSDIR=hdfs:///user/root/CFSRAparquetTranspose
-ROWCHUNKSBASEFNAME=CFSRAparquetTranspose
+ROWCHUNKSBASEFNAME=hdfs:///user/root/CFSRAparquetTranspose/CFSRAparquetTranspose
 NUMROWCHUNKFILES=47
-TRANSPOSECHUNKSIZE=1
+TRANSPOSECHUNKSIZE=150000
 
 #DIR="$(cd "`dirname "$0"`"; pwd)"
 DIR=/mnt2/climateLogs
 LOGDIR=$DIR/eventLogs
 LOGFILE=$DIR/fulltransposerun.log
-OUTPUTDIR=hdfs:///user/root/CFSRAparquet
+OUTPUTDIR=hdfs:///user/root/CFSRAparquet/CFSRAparquetmatrix
+COLNAMEDIR=hdfs:///user/root/CFSRAparquet/CFSRAparquetColNames
 mkdir -p $LOGDIR
 
 # expects to be run on EC2 in standalone mode with 29-execs on r3.8xlarge instances
@@ -26,7 +26,7 @@ spark-submit --verbose \
   --conf spark.eventLog.enabled=true \
   --conf spark.eventLog.dir=$LOGDIR \
   --jars $JARFILE \
-  --class org.apache.spark.mllib.linalg.distributed.transposeAvroChunks \
+  --class org.apache.spark.mllib.linalg.distributed.transposeAvroToParquet \
   $JARFILE \
-  $HDFSDIR $ROWCHUNKSBASEFNAME $NUMROWCHUNKFILES $OUTPUTDIR $TRANSPOSECHUNKSIZE \
+  $ROWCHUNKSBASEFNAME $NUMROWCHUNKFILES $OUTPUTDIR $COLNAMEDIR $TRANSPOSECHUNKSIZE \
   2>&1 | tee $LOGFILE
