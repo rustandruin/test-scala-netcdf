@@ -33,6 +33,11 @@ runTranspose <<= (assembly in Compile) map {
   (jarFile : File) => s"./runtranspose.sh ${jarFile}" !
 }
 
+lazy val runTranspose2 = taskKey[Unit]("Transpose climate fat matrix to skinny matrix")
+runTranspose2 <<= (assembly in Compile) map {
+  (jarFile : File) => s"./runtranspose2.sh ${jarFile}" !
+}
+
 val filename = "pgbh02.gdas.1979010100.grb2"
 lazy val runTestDump = taskKey[Unit]("Extract a record from the parquet matrix and export it in msgpack format")
 runTestDump <<= (assembly in Compile) map {
