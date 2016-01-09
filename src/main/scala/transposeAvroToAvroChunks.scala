@@ -36,6 +36,8 @@ object transposeAvroToAvroChunks {
    third arg: basefilename for where to place the avro column chunks of A in
    fourth arg: filename for where to store the column names for A
    fifth arg: number of column chunks to get from one row chunk
+   NB: must choose numSubChunks so that chunkSize/numSubChunks*numCols is 
+   less than 2^32 b/c of JVM's maximum array size restrictions
    */
   def appMain(sc: SparkContext, args : Array[String]) {
 
@@ -51,6 +53,7 @@ object transposeAvroToAvroChunks {
     // the number of columns in A^T
     val numCols = sqlContext.read.avro(baseInputFname + "0").first
                   .getAs[WrappedArray[Float]](1).length
+    logInfo(s"There are ${numCols} columns in A^T")
 
     // keep track of the current chunk of columns of A being computed
     // and all the rows in A^T / columns in A
@@ -93,8 +96,15 @@ object transposeAvroToAvroChunks {
         logInfo(s"Asserted that the row ordering is correct")
 
         // contains concat(row1, ..., lastrow) of this chunk of A^T 
-        val rowChunksOfATransposeData = 
-          chunkOfATranspose.map(pair => pair._2).toArray.flatten
+        logInfo(s"Number of columns: $numCols Number of rows: ${chunkOfATranspose.size}")
+        val rowChunksOfATransposeData = new Array[Float](numCols * chunkOfATranspose.size)
+        logInfo(s"created array holding ${rowChunksOfATransposeData.length} entries to hold ${chunkOfATranspose(0)._2.length * chunkOfATranspose.size} entries")
+        var offset = 0
+        chunkOfATranspose.foreach( pair => { 
+          pair._2 copyToArray (rowChunksOfATransposeData, offset)
+          offset = offset + numCols
+          logInfo(s"writing with next offset ${offset}")
+        })
         logInfo(s"Flattened these rows of A^T into one array")
 
         // Breeze stores matrices in column-major format, 

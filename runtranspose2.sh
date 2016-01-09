@@ -3,8 +3,10 @@
 JARFILE=$1
 ROWCHUNKSBASEFNAME=hdfs:///user/root/CFSRAparquetTranspose/CFSRAparquetTranspose
 NUMROWCHUNKFILES=47
-NUMSUBROWCHUNKS=3 
-# 3 corresponds to transposing about 333 rows of A^T at once
+NUMSUBROWCHUNKS=26 
+# 14 corresponds to transposing about 72 rows of A^T at once
+# since A^T has 54843120 entries in each row, this amount of data is the 
+# maximum that can fit in one JVM matrix b/c of max array size being 2^31 - 1
 
 #DIR="$(cd "`dirname "$0"`"; pwd)"
 DIR=/mnt2/climateLogs
