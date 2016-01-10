@@ -34,10 +34,12 @@ object transposeAvroToAvroChunks {
    first arg: basefilename for the avro row chunks of A^T
    second arg: number of avro row chunk files of A^T
    third arg: basefilename for where to place the avro column chunks of A in
-   fourth arg: filename for where to store the column names for A
-   fifth arg: number of column chunks to get from one row chunk
-   NB: must choose numSubChunks so that chunkSize/numSubChunks*numCols is 
-   less than 2^32 b/c of JVM's maximum array size restrictions
+   fourth arg: basefilename for where to place the final parquet A
+   fifth arg: filename for where to store the column names for A
+   sixth arg: number of column chunks to get from one row chunk
+
+   NB: when choosing parameters, consider both the JVM maximum array size
+    and the driver memory limit
    */
   def appMain(sc: SparkContext, args : Array[String]) {
 
@@ -46,9 +48,10 @@ object transposeAvroToAvroChunks {
 
     val baseInputFname = args(0)
     val numAvroRowChunks = args(1).toInt
-    val baseOutputFname = args(2)
-    val colNamesOutputFname = args(3)
-    val numSubChunks  = args(4).toInt
+    val tempOutputFname = args(2)
+    val baseOutputFname = args(3)
+    val colNamesOutputFname = args(4)
+    val numSubChunks  = args(5).toInt
 
     // the number of columns in A^T
     val numCols = sqlContext.read.avro(baseInputFname + "0").first
@@ -60,7 +63,7 @@ object transposeAvroToAvroChunks {
     var chunkCounterA  = 0
     val allColNames = ArrayBuffer.empty[String]
 
-    // iterate over the avro row chunks of A^T
+    // iterate over the avro row chunks of A^T, converting to column chunks of A^T
     for( rowChunkIdx <- 0 until numAvroRowChunks ) {
       // get the names of all the rows in this chunk of A^T and sort them
       val rowNames = sqlContext.read.avro(baseInputFname + rowChunkIdx.toString)
@@ -68,12 +71,13 @@ object transposeAvroToAvroChunks {
       val numRowsInChunk = rowNames.length
       logInfo(s"Collected ${numRowsInChunk} row names")
       quickSort(rowNames)
+
+      // for memory reasons, split this chunk of rows of A^T into multiple pieces
+      // then write the transpose of each piece into the column chunk of A
       allColNames ++= rowNames
       val rowChunks = rowNames.grouped(
                      ceil(numRowsInChunk.toDouble/numSubChunks).toInt).toArray
 
-      // for memory reasons, split this chunk of rows of A^T into multiple pieces
-      // then transpose each piece into a column chunk of A
       for(subRowChunkIdx <- 0 until rowChunks.length) {
         val chunkOfATranspose = 
           sqlContext.read.avro(baseInputFname + rowChunkIdx.toString)
@@ -95,34 +99,51 @@ object transposeAvroToAvroChunks {
                 (rowChunks(subRowChunkIdx) : Seq[String]) )
         logInfo(s"Asserted that the row ordering is correct")
 
-        // contains concat(row1, ..., lastrow) of this chunk of A^T 
-        logInfo(s"Number of columns: $numCols Number of rows: ${chunkOfATranspose.size}")
-        val rowChunksOfATransposeData = new Array[Float](numCols * chunkOfATranspose.size)
-        logInfo(s"created array holding ${rowChunksOfATransposeData.length} entries to hold ${chunkOfATranspose(0)._2.length * chunkOfATranspose.size} entries")
-        var offset = 0
-        chunkOfATranspose.foreach( pair => { 
-          pair._2 copyToArray (rowChunksOfATransposeData, offset)
-          offset = offset + numCols
-          logInfo(s"writing with next offset ${offset}")
+        val colChunkOfA = new Array[Array[Float]](rowChunks(subRowChunkIdx).length)
+        var curColInChunkOfA = 0
+
+        chunkOfATranspose.foreach( pair => {
+            colChunkOfA(curColInChunkOfA) = pair._2
+            curColInChunkOfA = curColInChunkOfA + 1
+            if (curColInChunkOfA % 100 == 0)
+              logInfo(s"wrote into column ${curColInChunkOfA} of this chunk of columns of A")
         })
-        logInfo(s"Flattened these rows of A^T into one array")
 
-        // Breeze stores matrices in column-major format, 
-        // so this implicitly transposes the chunk of A^T to get 
-        // a column chunk of A, then returns the rows of this chunk
-        // along with their row indices as (idx, floats)
-        val colChunksOfAData = 
-          new BDM(numCols, rowChunks(subRowChunkIdx).length, rowChunksOfATransposeData)
-          .t.copy.data.grouped(rowChunks(subRowChunkIdx).length).toArray
-          .zipWithIndex.map(pair => (pair._2, pair._1))
-        logInfo(s"Transposed the rows of A^T to get columns of A and added row indices")
+        // write out this chunk of columns of A as rows along with their 
+        // row indices as (idx, floats)
 
-        sc.parallelize(colChunksOfAData).toDF.write
-          .avro(baseOutputFname + chunkCounterA.toString)
+        val rowChunk = new Array[Tuple2[Int,Array[Float]]](numCols)
+        val colIndices = (0 until colChunkOfA.length).toArray
+
+        (0 until numCols).foreach( rowIdx => { 
+          rowChunk(rowIdx) = Tuple2(rowIdx, colIndices.map(colChunkOfA(_)(rowIdx))) 
+          if (rowIdx % 6000000 == 0)
+            logInfo(s"Populated row $rowIdx of this chunk of columns of A")
+        })
+
+        sc.parallelize(rowChunk).toDF.write
+          .parquet(tempOutputFname + chunkCounterA.toString)
         chunkCounterA = chunkCounterA + 1
       }
     }
+
+    // Store the column names
     sc.parallelize(allColNames).saveAsTextFile(colNamesOutputFname)
+    
+    /*
+    // Now merge all the chunks of columns back together into the final parquet files
+    val outputRowChunkSize = ceil(numCols.toDouble/numOutputRowChunks).toInt
+    val rowChunks = (0 until numCols).grouped(outputRowChunkSize).toArray
+
+    for( rowChunkIdx <- 0 until rowChunks.length) {
+      var rowChunkRdd = new RDD[Tuple[
+      for( colChunkIdx <- 0 until chunkCounterA) {
+        filter.
+
+      }
+    }
+    */
+
   }
 
 }
