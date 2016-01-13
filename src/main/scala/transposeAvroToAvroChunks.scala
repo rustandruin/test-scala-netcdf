@@ -20,6 +20,9 @@ object transposeAvroToAvroChunks {
 
   def main(args: Array[String]) = {
     val conf = new SparkConf().setAppName("transposeAvroToAvroChunks")
+      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      .set("spark.kryoserializer.buffer.max", "512m")
+    conf.registerKryoClasses(Array(classOf[Tuple2[Int, Array[Float]]]))
     val sc = new SparkContext(conf)
     sys.addShutdownHook({sc. stop() })
     appMain(sc, args)
@@ -121,7 +124,12 @@ object transposeAvroToAvroChunks {
             logInfo(s"Populated row $rowIdx of this chunk of columns of A")
         })
 
-        sc.parallelize(rowChunk).toDF.write
+        logInfo(s"Materializing row chunk RDD")
+        val parallelRowChunkRDD = sc.parallelize(rowChunk).cache
+        parallelRowChunkRDD.count
+        
+        logInfo(s"Writing row chunk RDD")
+        parallelRowChunkRDD.toDF.write
           .parquet(tempOutputFname + chunkCounterA.toString)
         chunkCounterA = chunkCounterA + 1
       }

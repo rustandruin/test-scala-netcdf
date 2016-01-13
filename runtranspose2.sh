@@ -27,7 +27,7 @@ NUMSUBROWCHUNKS=5
 # we need about 3 copies in memory in the driver at the same time, so choose accordingly
 # 10 corresponds to transposing about 100 rows of A^T at once
 
-#DIR="$(cd "`dirname "$0"`"; pwd)"
+CURDIR="$(cd "`dirname "$0"`"; pwd)"
 DIR=/mnt2/climateLogs
 LOGDIR=$DIR/eventLogs
 LOGFILE=$DIR/fulltransposerun.log
@@ -49,15 +49,15 @@ spark-submit --verbose \
   --num-executors 203 \
   --executor-cores 4 \
   --executor-memory 20G \
-  --driver-java-options '-Dlog4j.configuration=log4j.properties -XX:+UseConcMarkSweepGC -XX:+CMSIncrementalMode' \
+  --driver-java-options "-Dlog4j.configuration=file://$CURDIR/log4j.properties -XX:+UseConcMarkSweepGC -XX:+CMSIncrementalMode" \
   --conf "spark.driver.maxResultSize=120G" \
   --conf "spark.executor.extraJavaOptions=-Dlog4j.configuration=log4j.properties" \
   --conf spark.worker.timeout=1200000 \
   --conf spark.network.timeout=1200000 \
   --conf spark.eventLog.enabled=true \
   --conf spark.eventLog.dir=$LOGDIR \
-  --jars $JARFILE \
   --class org.apache.spark.mllib.linalg.distributed.transposeAvroToAvroChunks \
+  --files log4j.properties \
   $JARFILE \
   $ROWCHUNKSBASEFNAME $NUMROWCHUNKFILES $TEMPDIR $OUTPUTDIR $COLNAMEDIR $NUMSUBROWCHUNKS \
   2>&1 | tee $LOGFILE
