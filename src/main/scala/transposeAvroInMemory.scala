@@ -19,7 +19,7 @@ object transposeAvroInMemory {
   private val myLogger = Logger.getLogger("transposeAvro")
 
   def main(args: Array[String]) = {
-    val conf = new SparkConf().setAppName("transposeAvroToAvroChunks")
+    val conf = new SparkConf().setAppName("transposeAvroInMemory")
       .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
       .set("spark.kryoserializer.buffer.max", "512m")
     conf.registerKryoClasses(Array(classOf[Tuple2[Int, Array[Float]]]))

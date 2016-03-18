@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# For testing out code on a smaller subset of the matrix A^T
+#
 # This driver transposes a short and fat matrix A^T into a tall and skinny matrix A
 # It assumes the matrix A^T is given in Avro format as a collection of chunks of 
 # (row-string-label, Array[Float]) and returns a single parquet file of rows in the format
@@ -15,21 +17,20 @@
 # explosion into (i,j,val) and groupBys, then writing those chunks out to the same parquet
 # file in append mode
 #
-#
-# Note: NUMROWCHUNKFILES=47 for the CFSRA dataset
 
 JARFILE=$1
 ROWCHUNKSBASEFNAME=$SCRATCH/CFSRA/CFSRAparquetTranspose/CFSRAparquetTranspose
-NUMROWCHUNKFILES=47
+NUMROWCHUNKFILES=2
 NUMSUBROWCHUNKS=5
 # this controls the number of column chunks we break A^T into, so the size of
 # the column chunk we deal with when transposing, so the memory pressure we put
 # on the executors
-NUMPARTITIONS=390
+NUMPARTITIONS=66
 # this controls the number of partitions A^T is (row) partitioned over, so
 # should be chosen based on the memory available on the executors and the size
-# of A^T; use at least 46752/R partitions to use all executors, but use a
-# larger amount to increase flexibility in scheduling
+# of A^T
+# use 46752/R partitions at least, to ensure each executor is in use, but can
+# subdivide to get more partitions for increased flexibility
 
 CURDIR="$(cd "`dirname "$0"`"; pwd)"
 DIR=$CURDIR
@@ -51,12 +52,12 @@ mkdir -p $LOGDIR
 # Let R be the number of rows of A^T per executor, and C be the number of column chunks we're using, then
 # 220 Mb * R * (1  + 1/C) < 45 Gb is the requirement
 # Let's say that it's fine to take 220 Mb * R < 40 Gb. Take R = 180 rows per
-# executor => need 259 executors to find all rows in memory
+# executor => need 259 executors to fit all about 47000 rows in memory
 
 spark-submit --verbose \
   --master $SPARKURL \
   --driver-memory 120G \
-  --num-executors 130 \
+  --num-executors 33 \
   --executor-cores 16 \
   --executor-memory 120G \
   --conf "spark.driver.maxResultSize=120G" \
